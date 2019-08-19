@@ -11,10 +11,10 @@ use http;
 use tungstenite::protocol::{self, WebSocketConfig};
 
 use super::{body, header};
-use error::Kind;
-use filter::{Filter, FilterClone, One};
-use reject::Rejection;
-use reply::{Reply, Response};
+use crate::error::Kind;
+use crate::filter::{Filter, FilterClone, One};
+use crate::reject::Rejection;
+use crate::reply::{Reply, Response};
 
 #[doc(hidden)]
 #[deprecated(note = "will be replaced by ws2")]
@@ -59,12 +59,12 @@ pub fn ws2() -> impl Filter<Extract = One<Ws2>, Error = Rejection> + Copy {
             if conn.contains("upgrade") {
                 Ok(())
             } else {
-                Err(::reject::bad_request())
+                Err(crate::reject::bad_request())
             }
         })
         .untuple_one();
 
-    ::get2()
+    crate::get2()
         .and(connection_has_upgrade)
         .and(header::exact_ignore_case("upgrade", "websocket"))
         .and(header::exact("sec-websocket-version", "13"))
@@ -90,14 +90,14 @@ where
         let fut = body
             .on_upgrade()
             .map(move |upgraded| {
-                trace!("websocket upgrade complete");
+                logcrate::trace!("websocket upgrade complete");
 
                 let io =
                     protocol::WebSocket::from_raw_socket(upgraded, protocol::Role::Server, config);
 
                 fun(WebSocket { inner: io });
             })
-            .map_err(|err| debug!("ws upgrade error: {}", err));
+            .map_err(|err| logcrate::debug!("ws upgrade error: {}", err));
         ::hyper::rt::spawn(fut);
 
         Ws { key }
@@ -190,9 +190,9 @@ where
             .ws
             .body
             .on_upgrade()
-            .map_err(|err| debug!("ws upgrade error: {}", err))
+            .map_err(|err| logcrate::debug!("ws upgrade error: {}", err))
             .and_then(move |upgraded| {
-                trace!("websocket upgrade complete");
+                logcrate::trace!("websocket upgrade complete");
 
                 let io =
                     protocol::WebSocket::from_raw_socket(upgraded, protocol::Role::Server, config);
@@ -225,14 +225,14 @@ impl WebSocket {
     }
 
     /// Gracefully close this websocket.
-    pub fn close(mut self) -> impl Future<Item = (), Error = ::Error> {
+    pub fn close(mut self) -> impl Future<Item = (), Error = crate::Error> {
         future::poll_fn(move || Sink::close(&mut self))
     }
 }
 
 impl Stream for WebSocket {
     type Item = Message;
-    type Error = ::Error;
+    type Error = crate::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         loop {
@@ -242,11 +242,11 @@ impl Stream for WebSocket {
                     return Ok(Async::NotReady);
                 }
                 Err(::tungstenite::Error::ConnectionClosed) => {
-                    trace!("websocket closed");
+                    logcrate::trace!("websocket closed");
                     return Ok(Async::Ready(None));
                 }
                 Err(e) => {
-                    debug!("websocket poll error: {}", e);
+                    logcrate::debug!("websocket poll error: {}", e);
                     return Err(Kind::Ws(e).into());
                 }
             };
@@ -259,7 +259,7 @@ impl Stream for WebSocket {
                     return Ok(Async::Ready(Some(Message { inner: msg })));
                 }
                 protocol::Message::Pong(payload) => {
-                    trace!("websocket client pong: {:?}", payload);
+                    logcrate::trace!("websocket client pong: {:?}", payload);
                 }
             }
         }
@@ -268,7 +268,7 @@ impl Stream for WebSocket {
 
 impl Sink for WebSocket {
     type SinkItem = Message;
-    type SinkError = ::Error;
+    type SinkError = crate::Error;
 
     fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         match item.inner {
@@ -287,7 +287,7 @@ impl Sink for WebSocket {
         match self.inner.write_message(item.inner) {
             Ok(()) => Ok(AsyncSink::Ready),
             Err(::tungstenite::Error::SendQueueFull(inner)) => {
-                debug!("websocket send queue full");
+                logcrate::debug!("websocket send queue full");
                 Ok(AsyncSink::NotReady(Message { inner }))
             }
             Err(::tungstenite::Error::Io(ref err)) if err.kind() == WouldBlock => {
@@ -296,7 +296,7 @@ impl Sink for WebSocket {
                 Ok(AsyncSink::Ready)
             }
             Err(e) => {
-                debug!("websocket start_send error: {}", e);
+                logcrate::debug!("websocket start_send error: {}", e);
                 Err(Kind::Ws(e).into())
             }
         }
@@ -309,7 +309,7 @@ impl Sink for WebSocket {
                 Ok(Async::NotReady)
             }
             Err(err) => {
-                debug!("websocket poll_complete error: {}", err);
+                logcrate::debug!("websocket poll_complete error: {}", err);
                 Err(Kind::Ws(err).into())
             }
         }
@@ -321,11 +321,9 @@ impl Sink for WebSocket {
             Err(::tungstenite::Error::Io(ref err)) if err.kind() == WouldBlock => {
                 Ok(Async::NotReady)
             }
-            Err(::tungstenite::Error::ConnectionClosed) => {
-                Ok(Async::Ready(()))
-            }
+            Err(::tungstenite::Error::ConnectionClosed) => Ok(Async::Ready(())),
             Err(err) => {
-                debug!("websocket close error: {}", err);
+                logcrate::debug!("websocket close error: {}", err);
                 Err(Kind::Ws(err).into())
             }
         }

@@ -65,14 +65,20 @@ fn headers_not_exposed() {
         .header("access-control-request-method", "GET")
         .reply(&route);
 
-    assert_eq!(res.headers().contains_key("access-control-expose-headers"), false);
+    assert_eq!(
+        res.headers().contains_key("access-control-expose-headers"),
+        false
+    );
 
     let res = warp::test::request()
         .method("GET")
         .header("origin", "https://warp.rs")
         .reply(&route);
 
-    assert_eq!(res.headers().contains_key("access-control-expose-headers"), false);
+    assert_eq!(
+        res.headers().contains_key("access-control-expose-headers"),
+        false
+    );
 }
 
 #[test]
@@ -148,5 +154,4 @@ fn success() {
     assert_eq!(res.headers().get("access-control-allow-methods"), None);
     let exposed_headers = &res.headers()["access-control-expose-headers"];
     assert!(exposed_headers == "x-header1, x-header2" || exposed_headers == "x-header2, x-header1");
-
 }
