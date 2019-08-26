@@ -1,4 +1,8 @@
-use futures::{try_ready, Async, Future, Poll};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::future::Future;
+
+use futures::{ready, TryFuture};
 
 use super::{Either, Filter, FilterBase, Tuple};
 
@@ -10,6 +14,7 @@ pub struct Unify<F> {
 impl<F, T> FilterBase for Unify<F>
 where
     F: Filter<Extract = (Either<T, T>,)>,
+    F::Future: Unpin,
     T: Tuple,
 {
     type Extract = T;
@@ -30,17 +35,17 @@ pub struct UnifyFuture<F> {
 
 impl<F, T> Future for UnifyFuture<F>
 where
-    F: Future<Item = (Either<T, T>,)>,
+    F: TryFuture<Ok = (Either<T, T>,)> + Unpin,
 {
-    type Item = T;
-    type Error = F::Error;
+    type Output = Result<T, F::Error>;
 
     #[inline]
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let unified = match try_ready!(self.inner.poll()) {
-            (Either::A(a),) => a,
-            (Either::B(b),) => b,
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let unified = match ready!(Pin::new(&mut self.inner).try_poll(cx)) {
+            Ok((Either::A(a),)) => Ok(a),
+            Ok((Either::B(b),)) => Ok(b),
+            Err(err) => Err(err)
         };
-        Ok(Async::Ready(unified))
+        Poll::Ready(unified)
     }
 }

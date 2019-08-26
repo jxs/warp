@@ -124,6 +124,7 @@ pub struct WithHeader {
 impl<F, R> WrapSealed<F> for WithHeader
 where
     F: Filter<Extract = (R,)>,
+    F::Future: Unpin,
     R: Reply,
 {
     type Wrapped = Map<F, WithHeader_>;
@@ -143,6 +144,7 @@ pub struct WithHeaders {
 impl<F, R> WrapSealed<F> for WithHeaders
 where
     F: Filter<Extract = (R,)>,
+    F::Future: Unpin,
     R: Reply,
 {
     type Wrapped = Map<F, WithHeaders_>;
@@ -163,6 +165,7 @@ pub struct WithDefaultHeader {
 impl<F, R> WrapSealed<F> for WithDefaultHeader
 where
     F: Filter<Extract = (R,)>,
+    F::Future: Unpin,
     R: Reply,
 {
     type Wrapped = Map<F, WithDefaultHeader_>;

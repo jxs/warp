@@ -85,13 +85,15 @@ use std::fmt;
 use std::net::SocketAddr;
 #[cfg(feature = "websocket")]
 use std::thread;
+use std::future::Future;
+#[cfg(feature = "websocket")]
+use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::{future, Future, Stream};
+use futures::{future, TryFuture};
 #[cfg(feature = "websocket")]
-use futures::{
+use tokio::{
     sync::{mpsc, oneshot},
-    Sink,
 };
 use http::{
     header::{HeaderName, HeaderValue},
@@ -100,6 +102,8 @@ use http::{
 use serde::Serialize;
 use serde_json;
 use tokio::runtime::{Builder as RtBuilder, Runtime};
+#[cfg(feature = "websocket")]
+use tokio::net::TcpStream;
 
 use crate::filter::Filter;
 use crate::reject::Reject;
@@ -147,7 +151,7 @@ pub struct WsBuilder {
 #[cfg(feature = "websocket")]
 pub struct WsClient {
     tx: mpsc::UnboundedSender<crate::ws::Message>,
-    rx: ::futures::stream::Wait<mpsc::UnboundedReceiver<Result<crate::ws::Message, crate::Error>>>,
+    rx: ::futures::executor::BlockingStream<mpsc::UnboundedReceiver<Result<crate::ws::Message, crate::Error>>>,
 }
 
 /// An error from Websocket filter tests.
@@ -440,8 +444,8 @@ impl WsBuilder {
         F::Error: Reject + Send,
     {
         let (upgraded_tx, upgraded_rx) = oneshot::channel();
-        let (wr_tx, wr_rx) = mpsc::unbounded();
-        let (rd_tx, rd_rx) = mpsc::unbounded();
+        let (wr_tx, wr_rx) = mpsc::unbounded_channel();
+        let (rd_tx, rd_rx) = mpsc::unbounded_channel();
 
         let test_thread = ::std::thread::current();
         let test_name = test_thread.name().unwrap_or("<unknown>");
@@ -605,11 +609,14 @@ impl StdError for WsError {
 struct AddrConnect(SocketAddr);
 
 #[cfg(feature = "websocket")]
+type ConnectFuture = Pin<Box<dyn Future<Output = std::io::Result<TcpStream>> + Send>>;
+
+#[cfg(feature = "websocket")]
 impl ::hyper::client::connect::Connect for AddrConnect {
     type Transport = ::tokio::net::tcp::TcpStream;
     type Error = ::std::io::Error;
     type Future = ::futures::future::Map<
-        ::tokio::net::tcp::ConnectFuture,
+            ConnectFuture,
         fn(Self::Transport) -> (Self::Transport, ::hyper::client::connect::Connected),
     >;
 
@@ -631,10 +638,10 @@ fn new_rt() -> Runtime {
         .expect("new rt")
 }
 
-fn block_on<F>(fut: F) -> Result<F::Item, F::Error>
+fn block_on<F>(fut: F) -> Result<F::Ok, F::Error>
 where
-    F: Future + Send + 'static,
-    F::Item: Send + 'static,
+    F: TryFuture + Send + 'static,
+    F::Ok: Send + 'static,
     F::Error: Send + 'static,
 {
     let mut rt = new_rt();

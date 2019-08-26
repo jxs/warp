@@ -1,6 +1,9 @@
 use std::mem;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::future::Future;
 
-use futures::{Async, Future, IntoFuture, Poll};
+use futures::TryFuture;
 
 use super::{Filter, FilterBase, Func};
 use crate::route;
@@ -14,12 +17,12 @@ pub struct OrElse<T, F> {
 impl<T, F> FilterBase for OrElse<T, F>
 where
     T: Filter,
+    T::Future: Unpin,
     F: Func<T::Error> + Clone + Send,
-    F::Output: IntoFuture<Item = T::Extract, Error = T::Error> + Send,
-    <F::Output as IntoFuture>::Future: Send,
+    F::Output: TryFuture<Ok =  T::Extract, Error = T::Error> + Send + Unpin,
 {
-    type Extract = <F::Output as IntoFuture>::Item;
-    type Error = <F::Output as IntoFuture>::Error;
+    type Extract = <F::Output as TryFuture>::Ok;
+    type Error = <F::Output as TryFuture>::Error;
     type Future = OrElseFuture<T, F>;
     #[inline]
     fn filter(&self) -> Self::Future {
@@ -36,8 +39,7 @@ pub struct OrElseFuture<T: Filter, F>
 where
     T: Filter,
     F: Func<T::Error>,
-    F::Output: IntoFuture<Item = T::Extract, Error = T::Error> + Send,
-    <F::Output as IntoFuture>::Future: Send,
+    F::Output: TryFuture<Ok =  T::Extract, Error = T::Error> + Send,
 {
     state: State<T, F>,
     original_path_index: PathIndex,
@@ -47,11 +49,10 @@ enum State<T, F>
 where
     T: Filter,
     F: Func<T::Error>,
-    F::Output: IntoFuture<Item = T::Extract, Error = T::Error> + Send,
-    <F::Output as IntoFuture>::Future: Send,
+    F::Output: TryFuture<Ok =  T::Extract, Error = T::Error> + Send,
 {
     First(T::Future, F),
-    Second(<F::Output as IntoFuture>::Future),
+    Second(F::Output),
     Done,
 }
 
@@ -66,22 +67,21 @@ impl PathIndex {
 impl<T, F> Future for OrElseFuture<T, F>
 where
     T: Filter,
+    T::Future: Unpin,
     F: Func<T::Error>,
-    F::Output: IntoFuture<Item = T::Extract, Error = T::Error> + Send,
-    <F::Output as IntoFuture>::Future: Send,
+    F::Output: TryFuture<Ok =  T::Extract, Error = T::Error> + Send + Unpin,
 {
-    type Item = <F::Output as IntoFuture>::Item;
-    type Error = <F::Output as IntoFuture>::Error;
+    type Output = Result<<F::Output as TryFuture>::Ok, <F::Output as TryFuture>::Error>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let err = match self.state {
-            State::First(ref mut first, _) => match first.poll() {
-                Ok(Async::Ready(ex)) => return Ok(Async::Ready(ex)),
-                Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(err) => err,
+            State::First(ref mut first, _) => match Pin::new(first).try_poll(cx) {
+                Poll::Ready(Ok(ex)) => return Poll::Ready(Ok(ex)),
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(err)) => err,
             },
             State::Second(ref mut second) => {
-                return second.poll();
+                return Pin::new(second).try_poll(cx);
             }
             State::Done => panic!("polled after complete"),
         };
@@ -89,15 +89,15 @@ where
         self.original_path_index.reset_path();
 
         let mut second = match mem::replace(&mut self.state, State::Done) {
-            State::First(_, second) => second.call(err).into_future(),
+            State::First(_, second) => second.call(err),
             _ => unreachable!(),
         };
 
-        match second.poll()? {
-            Async::Ready(item) => Ok(Async::Ready(item)),
-            Async::NotReady => {
+        match Pin::new(&mut second).try_poll(cx) {
+            Poll::Ready(item) => Poll::Ready(item),
+            Poll::Pending => {
                 self.state = State::Second(second);
-                Ok(Async::NotReady)
+                Poll::Pending
             }
         }
     }

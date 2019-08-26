@@ -1,6 +1,9 @@
 use std::mem;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::future::Future;
 
-use futures::{Async, Future, Poll};
+use futures::TryFuture;
 
 use super::{Filter, FilterBase};
 use crate::generic::Either;
@@ -16,7 +19,9 @@ pub struct Or<T, U> {
 impl<T, U> FilterBase for Or<T, U>
 where
     T: Filter,
+    T::Future: Unpin,
     U: Filter + Clone + Send,
+    U::Future: Unpin,
     U::Error: CombineRejection<T::Error>,
 {
     type Extract = (Either<T::Extract, U::Extract>,);
@@ -55,30 +60,31 @@ impl PathIndex {
 impl<T, U> Future for EitherFuture<T, U>
 where
     T: Filter,
+    T::Future: Unpin,
     U: Filter,
+    U::Future: Unpin,
     U::Error: CombineRejection<T::Error>,
 {
-    type Item = (Either<T::Extract, U::Extract>,);
-    type Error = <U::Error as CombineRejection<T::Error>>::Rejection;
+    type Output = Result<(Either<T::Extract, U::Extract>,), <U::Error as CombineRejection<T::Error>>::Rejection>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let err1 = match self.state {
-            State::First(ref mut first, _) => match first.poll() {
-                Ok(Async::Ready(ex1)) => {
-                    return Ok(Async::Ready((Either::A(ex1),)));
+            State::First(ref mut first, _) => match Pin::new(first).try_poll(cx) {
+                Poll::Ready(Ok(ex1)) => {
+                    return Poll::Ready(Ok((Either::A(ex1),)));
                 }
-                Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => e,
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(e)) => e,
             },
             State::Second(ref mut err1, ref mut second) => {
-                return match second.poll() {
-                    Ok(Async::Ready(ex2)) => Ok(Async::Ready((Either::B(ex2),))),
-                    Ok(Async::NotReady) => Ok(Async::NotReady),
+                return match Pin::new(second).try_poll(cx) {
+                    Poll::Ready(Ok(ex2)) => Poll::Ready(Ok((Either::B(ex2),))),
+                    Poll::Pending => Poll::Pending,
 
-                    Err(e) => {
+                    Poll::Ready(Err(e)) => {
                         self.original_path_index.reset_path();
                         let err1 = err1.take().expect("polled after complete");
-                        Err(e.combine(err1))
+                        Poll::Ready(Err(e.combine(err1)))
                     }
                 };
             }
@@ -92,15 +98,15 @@ where
             _ => unreachable!(),
         };
 
-        match second.poll() {
-            Ok(Async::Ready(ex2)) => Ok(Async::Ready((Either::B(ex2),))),
-            Ok(Async::NotReady) => {
+        match Pin::new(&mut second).try_poll(cx) {
+            Poll::Ready(Ok(ex2)) => Poll::Ready(Ok((Either::B(ex2),))),
+            Poll::Pending => {
                 self.state = State::Second(Some(err1), second);
-                Ok(Async::NotReady)
+                Poll::Pending
             }
-            Err(e) => {
+            Poll::Ready(Err(e)) => {
                 self.original_path_index.reset_path();
-                return Err(e.combine(err1));
+                return Poll::Ready(Err(e.combine(err1)));
             }
         }
     }

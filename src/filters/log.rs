@@ -98,6 +98,7 @@ where
     F: Filter + Clone + Send,
     F::Extract: Reply,
     F::Error: Reject,
+    F::Future: Unpin,
 {
     type Wrapped = WithLog<FN, F>;
 
@@ -179,8 +180,11 @@ impl<T: fmt::Display> fmt::Display for OptFmt<T> {
 
 mod internal {
     use std::time::Instant;
+    use std::task::{Context, Poll};
+    use std::pin::Pin;
+    use std::future::Future;
 
-    use futures::{Async, Future, Poll};
+    use futures::future::TryFuture;
 
     use super::{Info, Log};
     use crate::filter::{Filter, FilterBase};
@@ -211,6 +215,7 @@ mod internal {
         F: Filter + Clone + Send,
         F::Extract: Reply,
         F::Error: Reject,
+        F::Future: Unpin,
     {
         type Extract = (Logged,);
         type Error = F::Error;
@@ -236,23 +241,24 @@ mod internal {
     impl<FN, F> Future for WithLogFuture<FN, F>
     where
         FN: Fn(Info),
-        F: Future,
-        F::Item: Reply,
+        F: TryFuture + Unpin,
+        F::Ok: Reply,
         F::Error: Reject,
     {
-        type Item = (Logged,);
-        type Error = F::Error;
-        fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-            let (result, status) = match self.future.poll() {
-                Ok(Async::Ready(reply)) => {
+        type Output = Result<(Logged,), F::Error>;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+            let (result, status) = match Pin::new(&mut self.future).try_poll(cx) {
+                Poll::Ready(Ok(reply)) => {
                     let resp = reply.into_response();
                     let status = resp.status();
-                    (Ok(Async::Ready((Logged(resp),))), status)
+                    (Poll::Ready(Ok((Logged(resp),))), status)
+
                 }
-                Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(reject) => {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(reject)) => {
                     let status = reject.status();
-                    (Err(reject), status)
+                    (Poll::Ready(Err(reject)), status)
                 }
             };
 

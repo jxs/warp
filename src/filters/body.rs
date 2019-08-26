@@ -4,10 +4,12 @@
 
 use std::error::Error as StdError;
 use std::fmt;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::future::Future;
 
 use bytes::Buf;
-use futures::stream::Concat2;
-use futures::{try_ready, Async, Future, Poll, Stream};
+use futures::{future, ready, TryFuture, TryStreamExt, Stream};
 use headers::ContentLength;
 use http::header::CONTENT_TYPE;
 use hyper::{Body, Chunk};
@@ -24,10 +26,10 @@ use crate::reject::{self, Rejection};
 // Does not consume any of it.
 pub(crate) fn body() -> impl Filter<Extract = (Body,), Error = Rejection> + Copy {
     filter_fn_one(|route| {
-        route.take_body().ok_or_else(|| {
+        future::ready(route.take_body().ok_or_else(|| {
             logcrate::error!("request body already taken in previous filter");
             reject::known(BodyConsumedMultipleTimes(()))
-        })
+        }))
     })
 }
 
@@ -104,7 +106,7 @@ pub fn stream() -> impl Filter<Extract = (BodyStream,), Error = Rejection> + Cop
 /// ```
 pub fn concat() -> impl Filter<Extract = (FullBody,), Error = Rejection> + Copy {
     body().and_then(|body: ::hyper::Body| Concat {
-        fut: body.concat2(),
+        fut: body.try_concat(),
     })
 }
 
@@ -123,7 +125,7 @@ fn is_content_type(
                 .and_then(|s| s.parse::<mime::Mime>().ok());
             if let Some(ct) = ct {
                 if ct.type_() == type_ && ct.subtype() == subtype {
-                    Ok(())
+                    future::ok(())
                 } else {
                     logcrate::debug!(
                         "content-type {:?} doesn't match {}/{}",
@@ -131,16 +133,16 @@ fn is_content_type(
                         type_,
                         subtype
                     );
-                    Err(reject::unsupported_media_type())
+                    future::err(reject::unsupported_media_type())
                 }
             } else {
                 logcrate::debug!("content-type {:?} couldn't be parsed", value);
-                Err(reject::unsupported_media_type())
+                future::err(reject::unsupported_media_type())
             }
         } else {
             // Optimistically assume its correct!
             logcrate::trace!("no content-type header, assuming {}/{}", type_, subtype);
-            Ok(())
+            future::ok(())
         }
     })
 }
@@ -250,20 +252,18 @@ impl Buf for FullBody {
 
 #[allow(missing_debug_implementations)]
 struct Concat {
-    fut: Concat2<Body>,
+    fut: futures_util::try_stream::TryConcat<Body>,
 }
 
 impl Future for Concat {
-    type Item = FullBody;
-    type Error = Rejection;
+    type Output = Result<FullBody, Rejection>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.fut.poll() {
-            Ok(Async::Ready(chunk)) => Ok(Async::Ready(FullBody { chunk })),
-            Ok(Async::NotReady) => Ok(Async::NotReady),
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        match ready!(Pin::new(&mut self.fut).try_poll(cx)) {
+            Ok(chunk) => Poll::Ready(Ok(FullBody { chunk })),
             Err(err) => {
                 logcrate::debug!("concat error: {}", err);
-                Err(reject::known(BodyReadError(err)))
+                Poll::Ready(Err(reject::known(BodyReadError(err))))
             }
         }
     }
@@ -277,16 +277,21 @@ pub struct BodyStream {
 }
 
 impl Stream for BodyStream {
-    type Item = StreamBuf;
-    type Error = crate::Error;
+    type Item = Result<StreamBuf, crate::Error>;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        let opt_item = try_ready!(self
-            .body
-            .poll()
-            .map_err(|e| crate::Error::from(crate::error::Kind::Hyper(e))));
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let mut opt_item: Option<Result<Chunk, hyper::Error>> = ready!(Pin::new(&mut self.body).poll_next(cx));
 
-        Ok(opt_item.map(|chunk| StreamBuf { chunk }).into())
+        match opt_item {
+            None =>  Poll::Ready(None),
+            Some(item) => {
+                let stream_buf = item
+                    .map_err(|e| crate::Error::from(crate::error::Kind::Hyper(e)))
+                    .map(|chunk| StreamBuf { chunk });
+
+                Poll::Ready(Some(stream_buf))
+            }
+        }
     }
 }
 

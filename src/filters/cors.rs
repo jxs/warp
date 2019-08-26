@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use std::error::Error as StdError;
 use std::sync::Arc;
 
+use futures::TryFutureExt;
+
 use headers::{
     AccessControlAllowHeaders, AccessControlAllowMethods, AccessControlExposeHeaders, HeaderMapExt,
 };
@@ -406,8 +408,11 @@ impl Configured {
 
 mod internal {
     use std::sync::Arc;
+    use std::task::{Context, Poll};
+    use std::pin::Pin;
+    use std::future::Future;
 
-    use futures::{future, try_ready, Future, Poll};
+    use futures::{future, ready};
     use headers::Origin;
     use http::header;
 
@@ -433,7 +438,7 @@ mod internal {
             One<Either<One<Preflight>, One<Either<One<Wrapped<F::Extract>>, F::Extract>>>>;
         type Error = <F::Error as CombineRejection<Rejection>>::Rejection;
         type Future = future::Either<
-            future::FutureResult<Self::Extract, Self::Error>,
+            future::Ready<Result<Self::Extract, Self::Error>>,
             WrappedFuture<F::Future>,
         >;
 
@@ -510,13 +515,12 @@ mod internal {
     impl<F> Future for WrappedFuture<F>
     where
         F: Future,
-        F::Error: CombineRejection<Rejection>,
     {
-        type Item = One<Either<One<Preflight>, One<Either<One<Wrapped<F::Item>>, F::Item>>>>;
-        type Error = <F::Error as CombineRejection<Rejection>>::Rejection;
+        type Output = Result<One<Either<One<Preflight>, One<Either<One<Wrapped<F::Output>>, F::Output>>>>, Rejection>;
 
-        fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-            let inner = try_ready!(self.inner.poll());
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+            let inner = ready!(self.inner.poll(cx));
             let item = if let Some((config, origin)) = self.wrapped.take() {
                 (Either::A((Wrapped {
                     config,
@@ -527,7 +531,7 @@ mod internal {
                 (Either::B(inner),)
             };
             let item = (Either::B(item),);
-            Ok(item.into())
+            Poll::Ready(Ok(item.into()))
         }
     }
 

@@ -96,7 +96,7 @@ pub mod reject;
 pub mod reply;
 mod route;
 mod server;
-pub mod test;
+// pub mod test;
 #[cfg(feature = "tls")]
 mod tls;
 mod transport;
@@ -122,9 +122,9 @@ pub use self::filters::{
     cookie,
     // cookie() function
     cookie::cookie,
-    cors,
+    // cors,
     // cors() function
-    cors::cors,
+    // cors::cors,
     ext,
     fs,
     header,
@@ -149,10 +149,10 @@ pub use self::filters::{
     sse::sse,
 };
 // ws() function
-#[cfg(feature = "websocket")]
-#[doc(hidden)]
-#[allow(deprecated)]
-pub use self::filters::ws::{ws, ws2};
+// #[cfg(feature = "websocket")]
+// #[doc(hidden)]
+// #[allow(deprecated)]
+// pub use self::filters::ws::{ws, ws2};
 #[doc(hidden)]
 pub use self::redirect::redirect;
 #[doc(hidden)]

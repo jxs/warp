@@ -8,6 +8,7 @@ use std::str::FromStr;
 
 use headers::{Header, HeaderMapExt};
 use http::HeaderMap;
+use futures::future;
 
 use crate::filter::{filter_fn, filter_fn_one, Filter, One};
 use crate::never::Never;
@@ -32,28 +33,30 @@ use crate::reject::{self, Rejection};
 /// // Parse `foo: bar` into a `String`
 /// let foo = warp::header::<String>("foo");
 /// ```
-pub fn header<T: FromStr + Send>(
+pub fn header<T: FromStr + Send + 'static>(
     name: &'static str,
 ) -> impl Filter<Extract = One<T>, Error = Rejection> + Copy {
     filter_fn_one(move |route| {
         logcrate::trace!("header({:?})", name);
-        route
+        let route = route
             .headers()
             .get(name)
             .ok_or_else(|| reject::missing_header(name))
             .and_then(|value| value.to_str().map_err(|_| reject::invalid_header(name)))
-            .and_then(|s| T::from_str(s).map_err(|_| reject::invalid_header(name)))
+            .and_then(|s| T::from_str(s).map_err(|_| reject::invalid_header(name)));
+        future::ready(route)
     })
 }
 
-pub(crate) fn header2<T: Header + Send>() -> impl Filter<Extract = One<T>, Error = Rejection> + Copy
+pub(crate) fn header2<T: Header + Send + 'static>() -> impl Filter<Extract = One<T>, Error = Rejection> + Copy
 {
     filter_fn_one(move |route| {
         logcrate::trace!("header2({:?})", T::name());
-        route
+        let route = route
             .headers()
             .typed_get()
-            .ok_or_else(|| reject::invalid_header(T::name().as_str()))
+            .ok_or_else(|| reject::invalid_header(T::name().as_str()));
+        future::ready(route)
     })
 }
 
@@ -73,7 +76,7 @@ pub fn optional<T>(
     name: &'static str,
 ) -> impl Filter<Extract = One<Option<T>>, Error = Rejection> + Copy
 where
-    T: FromStr + Send,
+    T: FromStr + Send + 'static + Unpin,
 {
     filter_fn_one(move |route| {
         logcrate::trace!("optional({:?})", name);
@@ -86,18 +89,18 @@ where
         });
 
         match result {
-            Some(Ok(t)) => Ok(Some(t)),
-            Some(Err(e)) => Err(e),
-            None => Ok(None),
+            Some(Ok(t)) => future::ok(Some(t)),
+            Some(Err(e)) => future::err(e),
+            None => future::ok(None),
         }
     })
 }
 
 pub(crate) fn optional2<T>() -> impl Filter<Extract = One<Option<T>>, Error = Never> + Copy
 where
-    T: Header + Send,
+    T: Header + Send + 'static,
 {
-    filter_fn_one(move |route| Ok(route.headers().typed_get()))
+    filter_fn_one(move |route| future::ready(Ok(route.headers().typed_get())))
 }
 
 /* TODO
@@ -136,7 +139,7 @@ pub fn exact(
 ) -> impl Filter<Extract = (), Error = Rejection> + Copy {
     filter_fn(move |route| {
         logcrate::trace!("exact?({:?}, {:?})", name, value);
-        route
+        let route = route
             .headers()
             .get(name)
             .ok_or_else(|| reject::missing_header(name))
@@ -146,7 +149,8 @@ pub fn exact(
                 } else {
                     Err(reject::invalid_header(name))
                 }
-            })
+            });
+            future::ready(route)
     })
 }
 
@@ -167,7 +171,7 @@ pub fn exact_ignore_case(
 ) -> impl Filter<Extract = (), Error = Rejection> + Copy {
     filter_fn(move |route| {
         logcrate::trace!("exact_ignore_case({:?}, {:?})", name, value);
-        route
+        let route = route
             .headers()
             .get(name)
             .ok_or_else(|| reject::missing_header(name))
@@ -177,7 +181,8 @@ pub fn exact_ignore_case(
                 } else {
                     Err(reject::invalid_header(name))
                 }
-            })
+            });
+        future::ready(route)
     })
 }
 
@@ -194,5 +199,5 @@ pub fn exact_ignore_case(
 ///     });
 /// ```
 pub fn headers_cloned() -> impl Filter<Extract = One<HeaderMap>, Error = Never> + Copy {
-    filter_fn_one(|route| Ok(route.headers().clone()))
+    filter_fn_one(|route| future::ok(route.headers().clone()))
 }

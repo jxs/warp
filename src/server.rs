@@ -3,18 +3,21 @@ use std::net::SocketAddr;
 #[cfg(feature = "tls")]
 use std::path::Path;
 use std::sync::Arc;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::future::Future;
 
-use futures::{Async, Future, Poll, Stream};
+use futures::{TryFuture, TryStream, TryStreamExt};
 use hyper::server::conn::AddrIncoming;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{rt, Server as HyperServer};
-use tokio_io::{AsyncRead, AsyncWrite};
+use hyper::{Server as HyperServer};
+use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::never::Never;
 use crate::reject::Reject;
 use crate::reply::Reply;
 use crate::transport::Transport;
 use crate::Request;
+use crate::Error;
 
 /// Create a `Server` with the provided service.
 pub fn serve<S>(service: S) -> Server<S>
@@ -123,16 +126,16 @@ macro_rules! try_bind {
 impl<S> Server<S>
 where
     S: IntoWarpService + 'static,
-    <<S::Service as WarpService>::Reply as Future>::Item: Reply + Send,
-    <<S::Service as WarpService>::Reply as Future>::Error: Reject + Send,
+    // <<S::Service as WarpService>::Reply as Future>::Item: Reply + Send,
+    // <<S::Service as WarpService>::Reply as Future>::Error: Reject + Send,
 {
     /// Run this `Server` forever on the current thread.
-    pub fn run(self, addr: impl Into<SocketAddr> + 'static) {
+    pub async fn run(self, addr: impl Into<SocketAddr> + 'static) {
         let (addr, fut) = self.bind_ephemeral(addr);
 
         logcrate::info!("warp drive engaged: listening on http://{}", addr);
 
-        rt::run(fut);
+        fut.await;
     }
 
     /// Run this `Server` forever on the current thread with a specific stream
@@ -141,24 +144,24 @@ where
     /// This can be used for Unix Domain Sockets, or TLS, etc.
     pub fn run_incoming<I>(self, incoming: I)
     where
-        I: Stream + Send + 'static,
-        I::Item: AsyncRead + AsyncWrite + Send + 'static,
+        I: TryStream + Send + 'static,
+        I::Ok: AsyncRead + AsyncWrite + Send + 'static + Unpin,
         I::Error: Into<Box<dyn StdError + Send + Sync>>,
     {
-        self.run_incoming2(incoming.map(crate::transport::LiftIo));
+        self.run_incoming2(incoming.map_ok(crate::transport::LiftIo).into_stream());
     }
 
-    fn run_incoming2<I>(self, incoming: I)
+    async fn run_incoming2<I>(self, incoming: I)
     where
-        I: Stream + Send + 'static,
-        I::Item: Transport + Send + 'static,
+        I: TryStream + Send + 'static,
+        I::Ok: Transport + Send + 'static,
         I::Error: Into<Box<dyn StdError + Send + Sync>>,
     {
         let fut = self.serve_incoming2(incoming);
 
         logcrate::info!("warp drive engaged: listening with custom incoming");
 
-        rt::run(fut);
+        fut.await;
     }
 
     /// Bind to a socket address, returning a `Future` that can be
@@ -170,7 +173,7 @@ where
     pub fn bind(
         self,
         addr: impl Into<SocketAddr> + 'static,
-    ) -> impl Future<Item = (), Error = ()> + 'static {
+    ) -> impl Future<Output = ()> + 'static {
         let (_, fut) = self.bind_ephemeral(addr);
         fut
     }
@@ -183,11 +186,11 @@ where
     pub fn try_bind(
         self,
         addr: impl Into<SocketAddr> + 'static,
-    ) -> impl Future<Item = (), Error = ()> + 'static {
+    ) -> impl Future<Output = ()> + 'static {
         let addr = addr.into();
         let result = try_bind!(self, &addr)
             .map_err(|e| logcrate::error!("error binding to {}: {}", addr, e));
-        futures::future::result(result)
+        futures::future::ready(result)
             .and_then(|(_, srv)| srv.map_err(|e| logcrate::error!("server error: {}", e)))
     }
 
@@ -202,7 +205,7 @@ where
     pub fn bind_ephemeral(
         self,
         addr: impl Into<SocketAddr> + 'static,
-    ) -> (SocketAddr, impl Future<Item = (), Error = ()> + 'static) {
+    ) -> (SocketAddr, impl Future<Output = ()> + 'static) {
         let (addr, srv) = bind!(self, addr);
         (
             addr,
@@ -220,7 +223,7 @@ where
     pub fn try_bind_ephemeral(
         self,
         addr: impl Into<SocketAddr> + 'static,
-    ) -> Result<(SocketAddr, impl Future<Item = (), Error = ()> + 'static), hyper::error::Error>
+    ) -> Result<(SocketAddr, impl Future<Output = ()> + 'static), hyper::error::Error>
     {
         let addr = addr.into();
         let (addr, srv) = try_bind!(self, &addr)?;
@@ -266,8 +269,8 @@ where
     pub fn bind_with_graceful_shutdown(
         self,
         addr: impl Into<SocketAddr> + 'static,
-        signal: impl Future<Item = ()> + Send + 'static,
-    ) -> (SocketAddr, impl Future<Item = (), Error = ()> + 'static) {
+        signal: impl Future<Output = ()> + Send + 'static,
+    ) -> (SocketAddr, impl Future<Output = ()> + 'static) {
         let (addr, srv) = bind!(self, addr);
         let fut = srv
             .with_graceful_shutdown(signal)
@@ -280,20 +283,20 @@ where
     /// This can be used for Unix Domain Sockets, or TLS, etc.
     ///
     /// Returns a `Future` that can be executed on any runtime.
-    pub fn serve_incoming<I>(self, incoming: I) -> impl Future<Item = (), Error = ()> + 'static
+    pub fn serve_incoming<I>(self, incoming: I) -> impl Future<Output = ()> + 'static
     where
-        I: Stream + Send + 'static,
-        I::Item: AsyncRead + AsyncWrite + Send + 'static,
+        I: TryStream + Send + 'static,
+        I::Ok: AsyncRead + AsyncWrite + Send + 'static + Unpin,
         I::Error: Into<Box<dyn StdError + Send + Sync>>,
     {
-        let incoming = incoming.map(crate::transport::LiftIo);
+        let incoming = incoming.map_ok(crate::transport::LiftIo);
         self.serve_incoming2(incoming)
     }
 
-    fn serve_incoming2<I>(self, incoming: I) -> impl Future<Item = (), Error = ()> + 'static
+    fn serve_incoming2<I>(self, incoming: I) -> impl Future<Output = ()> + 'static
     where
-        I: Stream + Send + 'static,
-        I::Item: Transport + Send + 'static,
+        I: TryStream + Send + 'static,
+        I::Ok: Transport + Send + 'static,
         I::Error: Into<Box<dyn StdError + Send + Sync>>,
     {
         let service = into_service!(self.service);
@@ -412,7 +415,7 @@ pub trait IntoWarpService {
 }
 
 pub trait WarpService {
-    type Reply: Future + Send;
+    type Reply: TryFuture + Send;
     fn call(&self, req: Request, remote_addr: Option<SocketAddr>) -> Self::Reply;
 }
 
@@ -425,21 +428,20 @@ struct ReplyFuture<F> {
 
 impl<F> Future for ReplyFuture<F>
 where
-    F: Future,
-    F::Item: Reply,
+    F: TryFuture + Unpin,
+    F::Ok: Reply,
     F::Error: Reject,
 {
-    type Item = crate::reply::Response;
-    type Error = Never;
+    type Output = crate::reply::Response;
 
     #[inline]
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.inner.poll() {
-            Ok(Async::Ready(ok)) => Ok(Async::Ready(ok.into_response())),
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(err) => {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        match Pin::new(&mut self.inner).try_poll(cx) {
+            Poll::Ready(Ok(ok)) => Poll::Ready(ok.into_response()),
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(err)) => {
                 logcrate::debug!("rejected: {:?}", err);
-                Ok(Async::Ready(err.into_response()))
+                Poll::Ready(err.into_response())
             }
         }
     }

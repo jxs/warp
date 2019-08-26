@@ -6,10 +6,12 @@ use std::fs::Metadata;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::future::Future;
+use std::task::Poll;
 
 use bytes::{BufMut, BytesMut};
 use futures::future::Either;
-use futures::{future, stream, try_ready, Future, Stream};
+use futures::{future, stream, ready, FutureExt, Stream, StreamExt};
 use headers::{
     AcceptRanges, ContentLength, ContentRange, ContentType, HeaderMapExt, IfModifiedSince, IfRange,
     IfUnmodifiedSince, LastModified, Range,
@@ -100,13 +102,13 @@ fn path_from_tail(
     base: Arc<PathBuf>,
 ) -> impl FilterClone<Extract = One<ArcPath>, Error = Rejection> {
     crate::path::tail()
-        .and_then(move |tail: crate::path::Tail| sanitize_path(base.as_ref(), tail.as_str()))
+        .and_then(move |tail: crate::path::Tail| future::ready(sanitize_path(base.as_ref(), tail.as_str())))
         .and_then(|buf: PathBuf| {
             // Checking Path::is_dir can block since it has to read from disk,
             // so put it in a blocking() future
             let mut buf = Some(buf);
-            future::poll_fn(move || {
-                let is_dir = try_ready!(tokio_threadpool::blocking(|| buf
+            future::poll_fn(move |_| {
+                let is_dir = ready!(tokio_threadpool::blocking(|| buf
                     .as_ref()
                     .unwrap()
                     .is_dir()));
@@ -118,7 +120,7 @@ fn path_from_tail(
 
                 logcrate::trace!("dir: {:?}", buf);
 
-                Ok(ArcPath(Arc::new(buf)).into())
+                ArcPath(Arc::new(buf)).into()
             })
             .map_err(|blocking_err: tokio_threadpool::BlockingError| {
                 logcrate::error!(
@@ -258,9 +260,9 @@ impl Reply for File {
 fn file_reply(
     path: ArcPath,
     conditionals: Conditionals,
-) -> impl Future<Item = File, Error = Rejection> + Send {
+) -> impl Future<Output = Result<File, Rejection>> + Send {
     TkFile::open(path.clone()).then(move |res| match res {
-        Ok(f) => Either::A(file_conditional(f, path, conditionals)),
+        Ok(f) => Either::Left(file_conditional(f, path, conditionals)),
         Err(err) => {
             let rej = match err.kind() {
                 io::ErrorKind::NotFound => {
@@ -276,16 +278,16 @@ fn file_reply(
                     reject::not_found()
                 }
             };
-            Either::B(future::err(rej))
+            Either::Right(future::err(rej))
         }
     })
 }
 
-fn file_metadata(f: TkFile) -> impl Future<Item = (TkFile, Metadata), Error = Rejection> {
+fn file_metadata(f: TkFile) -> impl Future<Output = Result<(TkFile, Metadata), Rejection>> {
     let mut f = Some(f);
-    future::poll_fn(move || {
-        let meta = try_ready!(f.as_mut().unwrap().poll_metadata());
-        Ok((f.take().unwrap(), meta).into())
+    future::poll_fn(move |_| {
+        let meta = ready!(f.as_mut().unwrap().poll_metadata());
+        (f.take().unwrap(), meta).into()
     })
     .map_err(|err: ::std::io::Error| {
         logcrate::debug!("file metadata error: {}", err);
@@ -297,7 +299,7 @@ fn file_conditional(
     f: TkFile,
     path: ArcPath,
     conditionals: Conditionals,
-) -> impl Future<Item = File, Error = Rejection> + Send {
+) -> impl Future<Output = Result<File, Rejection>> + Send {
     file_metadata(f).map(move |(file, meta)| {
         let mut len = meta.len();
         let modified = meta.modified().ok().map(LastModified::from);
@@ -392,36 +394,36 @@ fn file_stream(
     file: TkFile,
     buf_size: usize,
     (start, end): (u64, u64),
-) -> impl Stream<Item = Chunk, Error = io::Error> + Send {
+) -> impl Stream<Item = Result<Chunk, io::Error>> + Send {
     use std::io::SeekFrom;
 
     // seek
     let seek = if start != 0 {
         logcrate::trace!("partial content; seeking ({}..{})", start, end);
-        Either::A(file.seek(SeekFrom::Start(start)).map(|(f, _pos)| f))
+        Either::Left(file.seek(SeekFrom::Start(start)).map(|(f, _pos)| f))
     } else {
-        Either::B(future::ok(file))
+        Either::Right(future::ok(file))
     };
 
     seek.into_stream()
         .map(move |mut f| {
             let mut buf = BytesMut::new();
             let mut len = end - start;
-            stream::poll_fn(move || {
+            stream::poll_fn(move |_| {
                 if len == 0 {
-                    return Ok(None.into());
+                    return Poll::Ready(None.into());
                 }
                 if buf.remaining_mut() < buf_size {
                     buf.reserve(buf_size);
                 }
-                let n = try_ready!(f.read_buf(&mut buf).map_err(|err| {
+                let n = ready!(f.read_buf(&mut buf).map_err(|err| {
                     logcrate::debug!("file read error: {}", err);
                     err
                 })) as u64;
 
                 if n == 0 {
                     logcrate::debug!("file read found EOF before expected length");
-                    return Ok(None.into());
+                    return Poll::Ready(None.into());
                 }
 
                 let mut chunk = buf.take().freeze();
@@ -432,7 +434,7 @@ fn file_stream(
                     len -= n;
                 }
 
-                Ok(Some(Chunk::from(chunk)).into())
+                Poll::Ready(Some(Chunk::from(chunk)))
             })
         })
         .flatten()

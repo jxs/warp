@@ -410,8 +410,8 @@ impl Rejections {
                     StatusCode::BAD_REQUEST
                 } else if e.is::<crate::body::BodyDeserializeError>() {
                     StatusCode::BAD_REQUEST
-                } else if e.is::<crate::cors::CorsForbidden>() {
-                    StatusCode::FORBIDDEN
+                // } else if e.is::<crate::cors::CorsForbidden>() {
+                //     StatusCode::FORBIDDEN
                 } else if e.is::<crate::ext::MissingExtension>() {
                     StatusCode::INTERNAL_SERVER_ERROR
                 } else if e.is::<crate::reply::ReplyHttpError>() {

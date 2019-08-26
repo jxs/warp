@@ -1,7 +1,8 @@
 use std::fmt;
 use std::sync::Arc;
+use std::future::Future;
 
-use futures::Future;
+use futures::TryFutureExt;
 
 use super::{Filter, FilterBase, Tuple};
 use crate::reject::Rejection;
@@ -30,7 +31,7 @@ pub struct BoxedFilter<T: Tuple> {
         dyn Filter<
                 Extract = T,
                 Error = Rejection,
-                Future = Box<dyn Future<Item = T, Error = Rejection> + Send>,
+                Future = Box<dyn Future<Output = Result<T, Rejection>> + Send + Unpin>,
             > + Send
             + Sync,
     >,
@@ -40,6 +41,7 @@ impl<T: Tuple + Send> BoxedFilter<T> {
     pub(super) fn new<F>(filter: F) -> BoxedFilter<T>
     where
         F: Filter<Extract = T> + Send + Sync + 'static,
+        F::Future: Unpin,
         F::Error: Into<Rejection>,
     {
         BoxedFilter {
@@ -72,7 +74,7 @@ fn _assert_send() {
 impl<T: Tuple + Send> FilterBase for BoxedFilter<T> {
     type Extract = T;
     type Error = Rejection;
-    type Future = Box<dyn Future<Item = T, Error = Rejection> + Send>;
+    type Future = Box<dyn Future<Output = Result<T, Rejection>> + Send + Unpin>;
 
     fn filter(&self) -> Self::Future {
         self.filter.filter()
@@ -86,13 +88,13 @@ struct BoxingFilter<F> {
 impl<F> FilterBase for BoxingFilter<F>
 where
     F: Filter,
-    F::Future: Send + 'static,
+    F::Future: Send + 'static + Unpin,
 {
     type Extract = F::Extract;
     type Error = F::Error;
-    type Future = Box<dyn Future<Item = Self::Extract, Error = Self::Error> + Send>;
+    type Future = Box<dyn Future<Output = Result<Self::Extract, Self::Error>> + Send + Unpin>;
 
     fn filter(&self) -> Self::Future {
-        Box::new(self.filter.filter())
+        Box::new(self.filter.filter().into_future())
     }
 }

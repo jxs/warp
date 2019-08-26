@@ -40,8 +40,11 @@ use std::error::Error as StdError;
 use std::fmt::{self, Display, Formatter, Write};
 use std::str::FromStr;
 use std::time::Duration;
+use std::task::{Context, Poll};
+use std::pin::Pin;
+use std::future::Future;
 
-use futures::{Async, Future, Poll, Stream};
+use futures::{future, Stream, TryStream, TryStreamExt};
 use http::header::{HeaderValue, CACHE_CONTROL, CONTENT_TYPE};
 use hyper::Body;
 use serde::Serialize;
@@ -297,7 +300,7 @@ where
                 .find_cause::<crate::reject::MissingHeader>()
                 .is_some()
             {
-                return Ok((None,));
+                return future::ok((None,));
             }
             Err(rejection)
         })
@@ -329,9 +332,9 @@ pub fn sse() -> impl Filter<Extract = One<Sse>, Error = Rejection> + Copy {
                         .find_cause::<crate::reject::MissingHeader>()
                         .is_some()
                     {
-                        return Ok(());
+                        return future::ok(());
                     }
-                    Err(rejection)
+                    future::err(rejection)
                 },
             ),
         )
@@ -410,8 +413,8 @@ impl Sse {
     /// ```
     pub fn reply<S>(self, event_stream: S) -> impl Reply
     where
-        S: Stream + Send + 'static,
-        S::Item: ServerSentEvent,
+        S: TryStream + Send + Sync + 'static,
+        S::Ok: ServerSentEvent,
         S::Error: StdError + Send + Sync + 'static,
     {
         SseReply { event_stream }
@@ -431,8 +434,8 @@ struct SseReply<S> {
 
 impl<S> Reply for SseReply<S>
 where
-    S: Stream + Send + 'static,
-    S::Item: ServerSentEvent,
+    S: TryStream + Send + Sync + 'static,
+    S::Ok: ServerSentEvent,
     S::Error: StdError + Send + Sync + 'static,
 {
     #[inline]
@@ -444,7 +447,8 @@ where
                 logcrate::error!("sse stream error: {}", error);
                 SseError
             })
-            .and_then(|event| SseWrapper::format(&event));
+            .into_stream()
+            .and_then(|event| future::ready(SseWrapper::format(&event)));
 
         let mut res = Response::new(Body::wrap_stream(body_stream));
         // Set appropriate content type
@@ -488,14 +492,13 @@ impl KeepAlive {
     pub fn stream<S>(
         self,
         event_stream: S,
-    ) -> impl Stream<
-        Item = impl ServerSentEvent + Send + 'static,
+    ) -> impl TryStream<
+        Ok = impl ServerSentEvent + Send + 'static,
         Error = impl StdError + Send + Sync + 'static,
-    > + Send
-                 + 'static
+    > + Send + 'static + Unpin
     where
-        S: Stream + Send + 'static,
-        S::Item: ServerSentEvent + Send,
+        S: TryStream + Send + 'static + Unpin,
+        S::Ok: ServerSentEvent + Send,
         S::Error: StdError + Send + Sync + 'static,
     {
         let alive_timer = Delay::new(now() + self.max_interval);
@@ -521,15 +524,14 @@ struct SseKeepAlive<S> {
 pub fn keep<S>(
     event_stream: S,
     keep_interval: impl Into<Option<Duration>>,
-) -> impl Stream<
-    Item = impl ServerSentEvent + Send + 'static,
+) -> impl TryStream<
+    Ok = impl ServerSentEvent + Send + 'static,
     Error = impl StdError + Send + Sync + 'static,
-> + Send
-         + 'static
+> + Send + 'static
 where
-    S: Stream + Send + 'static,
-    S::Item: ServerSentEvent + Send,
-    S::Error: StdError + Send + Sync + 'static,
+    S: Stream + Send + 'static + Unpin,
+    // S::Item: ServerSentEvent + Send,
+    // S::Error: StdError + Send + Sync + 'static,
 {
     let max_interval = keep_interval
         .into()
@@ -591,39 +593,34 @@ pub fn keep_alive() -> KeepAlive {
 
 impl<S> Stream for SseKeepAlive<S>
 where
-    S: Stream + Send + 'static,
-    S::Item: ServerSentEvent,
+    S: TryStream + Send + 'static + Unpin,
+    S::Ok: ServerSentEvent,
     S::Error: StdError + Send + Sync + 'static,
 {
-    type Item = EitherServerSentEvent<S::Item, SseComment<Cow<'static, str>>>;
-    type Error = SseError;
+    type Item = Result<EitherServerSentEvent<S::Ok, SseComment<Cow<'static, str>>>, SseError>;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        match self.event_stream.poll() {
-            Ok(Async::NotReady) => match self.alive_timer.poll() {
-                Ok(Async::NotReady) => Ok(Async::NotReady),
-                Ok(Async::Ready(_)) => {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.event_stream).try_poll_next_unpin(cx) {
+            Poll::Pending => match Pin::new(&mut self.alive_timer).poll(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(_) => {
                     // restart timer
                     self.alive_timer.reset(now() + self.max_interval);
                     let comment_str = self.comment_text.clone();
-                    Ok(Async::Ready(Some(EitherServerSentEvent::B(SseComment(
+                    Poll::Ready(Some(Ok(EitherServerSentEvent::B(SseComment(
                         comment_str,
                     )))))
                 }
-                Err(error) => {
-                    logcrate::error!("sse::keep error: {}", error);
-                    Err(SseError)
-                }
             },
-            Ok(Async::Ready(Some(event))) => {
+            Poll::Ready(Some(Ok(event))) => {
                 // restart timer
                 self.alive_timer.reset(now() + self.max_interval);
-                Ok(Async::Ready(Some(EitherServerSentEvent::A(event))))
-            }
-            Ok(Async::Ready(None)) => Ok(Async::Ready(None)),
-            Err(error) => {
+                Poll::Ready(Some(Ok(EitherServerSentEvent::A(event))))
+            },
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Ready(Some(Err(error))) => {
                 logcrate::error!("sse::keep error: {}", error);
-                Err(SseError)
+                Poll::Ready(Some(Err(SseError)))
             }
         }
     }

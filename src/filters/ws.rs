@@ -4,8 +4,11 @@
 
 use std::fmt;
 use std::io::ErrorKind::WouldBlock;
+use std::task::{Context, Poll};
+use std::pin::Pin;
+use std::future::Future;
 
-use futures::{future, Async, AsyncSink, Future, Poll, Sink, StartSend, Stream};
+use futures::{future, SinkExt, Sink, Stream, TryFutureExt};
 use headers::{Connection, HeaderMapExt, SecWebsocketAccept, SecWebsocketKey, Upgrade};
 use http;
 use tungstenite::protocol::{self, WebSocketConfig};
@@ -21,7 +24,7 @@ use crate::reply::{Reply, Response};
 pub fn ws<F, U>(fun: F) -> impl FilterClone<Extract = One<Ws>, Error = Rejection>
 where
     F: Fn(WebSocket) -> U + Clone + Send + 'static,
-    U: Future<Item = (), Error = ()> + Send + 'static,
+    U: Future<Output = ()> + Send + 'static,
 {
     ws_new(move || {
         let fun = fun.clone();
@@ -147,7 +150,7 @@ impl Ws2 {
     pub fn on_upgrade<F, U>(self, func: F) -> impl Reply
     where
         F: FnOnce(WebSocket) -> U + Send + 'static,
-        U: Future<Item = (), Error = ()> + Send + 'static,
+        U: Future<Output = ()> + Send + 'static,
     {
         WsReply {
             ws: self,
@@ -181,7 +184,7 @@ struct WsReply<F> {
 impl<F, U> Reply for WsReply<F>
 where
     F: FnOnce(WebSocket) -> U + Send + 'static,
-    U: Future<Item = (), Error = ()> + Send + 'static,
+    U: Future<Output = ()> + Send + 'static,
 {
     fn into_response(self) -> Response {
         let on_upgrade = self.on_upgrade;
@@ -231,23 +234,22 @@ impl WebSocket {
 }
 
 impl Stream for WebSocket {
-    type Item = Message;
-    type Error = crate::Error;
+    type Item = Result<Message, crate::Error>;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         loop {
             let msg = match self.inner.read_message() {
                 Ok(item) => item,
                 Err(::tungstenite::Error::Io(ref err)) if err.kind() == WouldBlock => {
-                    return Ok(Async::NotReady);
+                    return Poll::Pending;
                 }
                 Err(::tungstenite::Error::ConnectionClosed) => {
                     logcrate::trace!("websocket closed");
-                    return Ok(Async::Ready(None));
+                    return Poll::Ready(None);
                 }
                 Err(e) => {
                     logcrate::debug!("websocket poll error: {}", e);
-                    return Err(Kind::Ws(e).into());
+                    return Poll::Ready(Some(Err(Kind::Ws(e).into())));
                 }
             };
 
@@ -256,7 +258,7 @@ impl Stream for WebSocket {
                 | msg @ protocol::Message::Binary(..)
                 | msg @ protocol::Message::Close(..)
                 | msg @ protocol::Message::Ping(..) => {
-                    return Ok(Async::Ready(Some(Message { inner: msg })));
+                    return Poll::Ready(Some(Ok(Message { inner: msg })));
                 }
                 protocol::Message::Pong(payload) => {
                     logcrate::trace!("websocket client pong: {:?}", payload);
@@ -266,11 +268,10 @@ impl Stream for WebSocket {
     }
 }
 
-impl Sink for WebSocket {
-    type SinkItem = Message;
-    type SinkError = crate::Error;
+impl Sink<Message> for WebSocket {
+    type Error = crate::Error;
 
-    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+      fn start_send(self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
         match item.inner {
             protocol::Message::Ping(..) => {
                 // warp doesn't yet expose a way to construct a `Ping` message,
@@ -279,21 +280,21 @@ impl Sink for WebSocket {
                 //
                 // tungstenite already auto-reponds to `Ping`s with a `Pong`,
                 // so this just prevents accidentally sending extra pings.
-                return Ok(AsyncSink::Ready);
+                return Ok(());
             }
             _ => (),
         }
 
         match self.inner.write_message(item.inner) {
-            Ok(()) => Ok(AsyncSink::Ready),
+            Ok(()) => Ok(()),
             Err(::tungstenite::Error::SendQueueFull(inner)) => {
                 logcrate::debug!("websocket send queue full");
-                Ok(AsyncSink::NotReady(Message { inner }))
+                Err(::tungstenite::Error::SendQueueFull(inner))
             }
             Err(::tungstenite::Error::Io(ref err)) if err.kind() == WouldBlock => {
                 // the message was accepted and partly written, so this
                 // isn't an error.
-                Ok(AsyncSink::Ready)
+                Ok(())
             }
             Err(e) => {
                 logcrate::debug!("websocket start_send error: {}", e);
@@ -302,29 +303,32 @@ impl Sink for WebSocket {
         }
     }
 
-    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut Context
+    ) -> Poll<Result<(), Self::Error>> {
         match self.inner.write_pending() {
-            Ok(()) => Ok(Async::Ready(())),
+            Ok(()) => Poll::Ready(Ok(())),
             Err(::tungstenite::Error::Io(ref err)) if err.kind() == WouldBlock => {
-                Ok(Async::NotReady)
+                Poll::Ready(Ok(()))
             }
             Err(err) => {
                 logcrate::debug!("websocket poll_complete error: {}", err);
-                Err(Kind::Ws(err).into())
+                Poll::Ready(Err(Kind::Ws(err).into()))
             }
         }
     }
 
-    fn close(&mut self) -> Poll<(), Self::SinkError> {
+    fn poll_close(
+        self: Pin<&mut Self>,
+        cx: &mut Context
+    ) -> Poll<Result<(), Self::Error>> {
         match self.inner.close(None) {
-            Ok(()) => Ok(Async::Ready(())),
-            Err(::tungstenite::Error::Io(ref err)) if err.kind() == WouldBlock => {
-                Ok(Async::NotReady)
-            }
-            Err(::tungstenite::Error::ConnectionClosed) => Ok(Async::Ready(())),
+            Ok(()) => Poll::Ready(Ok(())),
+            Err(::tungstenite::Error::ConnectionClosed) => Poll::Ready(Ok(())),
             Err(err) => {
                 logcrate::debug!("websocket close error: {}", err);
-                Err(Kind::Ws(err).into())
+                Poll::Ready(Err(Kind::Ws(err).into()))
             }
         }
     }
