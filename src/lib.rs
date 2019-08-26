@@ -84,8 +84,17 @@
 //!
 //! [Filter]: trait.Filter.html
 
-// #[macro_use]
-// extern crate logcrate;
+macro_rules! pin_unchecked {
+    ($arg:expr) => {
+        unsafe { std::pin::Pin::new_unchecked($arg) }
+    }
+}
+
+macro_rules! get_unchecked {
+    ($arg:ident) => {
+        unsafe { $arg.as_mut().get_unchecked_mut() }
+    }
+}
 
 mod error;
 mod filter;
@@ -140,7 +149,7 @@ pub use self::filters::{
     path,
     // the index() function
     path::index,
-    // path() function
+    // path() function and macro
     path::path,
     query,
     // query() function
@@ -170,5 +179,6 @@ pub use http;
 pub use bytes::Buf;
 #[doc(hidden)]
 pub use futures::{Future, Sink, Stream};
+#[doc(hidden)]
 
 pub(crate) type Request = http::Request<hyper::Body>;

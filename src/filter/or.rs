@@ -1,6 +1,8 @@
-use std::mem;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::future::Future;
 
-use futures::{Async, Future, Poll};
+use futures::{ready, TryFuture};
 
 use super::{Filter, FilterBase};
 use crate::generic::Either;
@@ -58,50 +60,39 @@ where
     U: Filter,
     U::Error: CombineRejection<T::Error>,
 {
-    type Item = (Either<T::Extract, U::Extract>,);
-    type Error = <U::Error as CombineRejection<T::Error>>::Rejection;
+    type Output = Result<(Either<T::Extract, U::Extract>,), <U::Error as CombineRejection<T::Error>>::Rejection>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let err1 = match self.state {
-            State::First(ref mut first, _) => match first.poll() {
-                Ok(Async::Ready(ex1)) => {
-                    return Ok(Async::Ready((Either::A(ex1),)));
-                }
-                Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => e,
-            },
-            State::Second(ref mut err1, ref mut second) => {
-                return match second.poll() {
-                    Ok(Async::Ready(ex2)) => Ok(Async::Ready((Either::B(ex2),))),
-                    Ok(Async::NotReady) => Ok(Async::NotReady),
-
-                    Err(e) => {
-                        self.original_path_index.reset_path();
-                        let err1 = err1.take().expect("polled after complete");
-                        Err(e.combine(err1))
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let pin = get_unchecked!(self);
+        loop {
+            let (err1, fut2) = match pin.state {
+                State::First(ref mut first, ref mut second) => match ready!(pin_unchecked!(first).try_poll(cx)) {
+                    Ok(ex1) => {
+                        return Poll::Ready(Ok((Either::A(ex1),)));
                     }
-                };
-            }
-            State::Done => panic!("polled after complete"),
-        };
+                    Err(e) => {
+                        pin.original_path_index.reset_path();
+                        (e, second.filter())
+                    }
+                },
+                State::Second(ref mut err1, ref mut second) => {
+                    let ex2 = match ready!(pin_unchecked!(second).try_poll(cx)) {
+                        Ok(ex2) => {
+                            Ok((Either::B(ex2),))
+                        },
+                        Err(e) => {
+                            pin.original_path_index.reset_path();
+                            let err1 = err1.take().expect("polled after complete");
+                            Err(e.combine(err1))
+                        }
+                    };
+                    pin.state = State::Done;
+                    return Poll::Ready(ex2)
+                }
+                State::Done => panic!("polled after complete"),
+            };
 
-        self.original_path_index.reset_path();
-
-        let mut second = match mem::replace(&mut self.state, State::Done) {
-            State::First(_, second) => second.filter(),
-            _ => unreachable!(),
-        };
-
-        match second.poll() {
-            Ok(Async::Ready(ex2)) => Ok(Async::Ready((Either::B(ex2),))),
-            Ok(Async::NotReady) => {
-                self.state = State::Second(Some(err1), second);
-                Ok(Async::NotReady)
-            }
-            Err(e) => {
-                self.original_path_index.reset_path();
-                return Err(e.combine(err1));
-            }
+            pin.state = State::Second(Some(err1), fut2);
         }
     }
 }

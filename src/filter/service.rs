@@ -1,6 +1,9 @@
 use std::net::SocketAddr;
+use std::task::{Context, Poll};
+use std::pin::Pin;
+use std::future::Future;
 
-use futures::{Future, Poll};
+use futures::future::TryFuture;
 
 use crate::reject::Reject;
 use crate::reply::Reply;
@@ -16,8 +19,8 @@ pub struct FilteredService<F> {
 impl<F> WarpService for FilteredService<F>
 where
     F: Filter,
-    <F::Future as Future>::Item: Reply,
-    <F::Future as Future>::Error: Reject,
+    <F::Future as TryFuture>::Ok: Reply,
+    <F::Future as TryFuture>::Error: Reject,
 {
     type Reply = FilteredFuture<F::Future>;
 
@@ -42,26 +45,26 @@ pub struct FilteredFuture<F> {
 
 impl<F> Future for FilteredFuture<F>
 where
-    F: Future,
+    F: TryFuture,
 {
-    type Item = F::Item;
-    type Error = F::Error;
+    type Output = Result<F::Ok, F::Error>;
 
     #[inline]
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         debug_assert!(!route::is_set(), "nested route::set calls");
 
-        let fut = &mut self.future;
-        route::set(&self.route, || fut.poll())
+        let pin = get_unchecked!(self);
+        let fut = &mut pin.future;
+        route::set(&pin.route, || pin_unchecked!(fut).try_poll(cx))
     }
 }
 
 impl<F> IntoWarpService for FilteredService<F>
 where
     F: Filter + Send + Sync + 'static,
-    <F::Future as Future>::Item: Reply,
-    <F::Future as Future>::Error: Reject,
-{
+    F::Extract: Reply,
+    F::Error: Reject,
+    {
     type Service = FilteredService<F>;
 
     #[inline]
@@ -73,9 +76,9 @@ where
 impl<F> IntoWarpService for F
 where
     F: Filter + Send + Sync + 'static,
-    <F::Future as Future>::Item: Reply,
-    <F::Future as Future>::Error: Reject,
-{
+    F::Extract: Reply,
+    F::Error: Reject,
+    {
     type Service = FilteredService<F>;
 
     #[inline]

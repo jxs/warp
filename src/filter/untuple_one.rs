@@ -1,4 +1,8 @@
-use futures::{try_ready, Async, Future, Poll};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::future::Future;
+
+use futures::{ready, TryFuture};
 
 use super::{Filter, FilterBase, Tuple};
 
@@ -33,12 +37,14 @@ where
     F: Filter<Extract = (T,)>,
     T: Tuple,
 {
-    type Item = T;
-    type Error = F::Error;
+    type Output = Result<T, F::Error>;
 
     #[inline]
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let (t,) = try_ready!(self.extract.poll());
-        Ok(Async::Ready(t))
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let extract = &mut get_unchecked!(self).extract;
+        match ready!(pin_unchecked!(extract).try_poll(cx)) {
+            Ok((t,)) => Poll::Ready(Ok(t)),
+            Err(err) => Poll::Ready(Err(err)),
+        }
     }
 }
