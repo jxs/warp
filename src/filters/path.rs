@@ -130,6 +130,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use http::uri::PathAndQuery;
+use futures::future;
 
 use crate::filter::{filter_fn, one, Filter, One, Tuple};
 use crate::never::Never;
@@ -162,7 +163,7 @@ pub fn path(p: &'static str) -> impl Filter<Extract = (), Error = Rejection> + C
     );
 
     segment(move |seg| {
-        logcrate::trace!("{:?}?: {:?}", p, seg);
+        log::trace!("{:?}?: {:?}", p, seg);
         if seg == p {
             Ok(())
         } else {
@@ -191,9 +192,9 @@ pub fn index() -> impl Filter<Extract = (), Error = Rejection> + Copy {
 pub fn end() -> impl Filter<Extract = (), Error = Rejection> + Copy {
     filter_fn(move |route| {
         if route.path().is_empty() {
-            Ok(())
+            future::ok(())
         } else {
-            Err(reject::not_found())
+            future::err(reject::not_found())
         }
     })
 }
@@ -216,9 +217,9 @@ pub fn end() -> impl Filter<Extract = (), Error = Rejection> + Copy {
 ///         format!("You asked for /{}", id)
 ///     });
 /// ```
-pub fn param<T: FromStr + Send>() -> impl Filter<Extract = One<T>, Error = Rejection> + Copy {
+pub fn param<T: FromStr + Send + 'static>() -> impl Filter<Extract = One<T>, Error = Rejection> + Copy {
     segment(|seg| {
-        logcrate::trace!("param?: {:?}", seg);
+        log::trace!("param?: {:?}", seg);
         if seg.is_empty() {
             return Err(reject::not_found());
         }
@@ -247,11 +248,11 @@ pub fn param<T: FromStr + Send>() -> impl Filter<Extract = One<T>, Error = Rejec
 /// ```
 pub fn param2<T>() -> impl Filter<Extract = One<T>, Error = Rejection> + Copy
 where
-    T: FromStr + Send,
+    T: FromStr + Send + 'static,
     T::Err: Into<crate::reject::Cause>,
 {
     segment(|seg| {
-        logcrate::trace!("param?: {:?}", seg);
+        log::trace!("param?: {:?}", seg);
         if seg.is_empty() {
             return Err(reject::not_found());
         }
@@ -289,7 +290,7 @@ pub fn tail() -> impl Filter<Extract = One<Tail>, Error = Never> + Copy {
         let end = path.path().len() - idx;
         route.set_unmatched_path(end);
 
-        Ok(one(Tail {
+        future::ok(one(Tail {
             path,
             start_index: idx,
         }))
@@ -338,7 +339,7 @@ pub fn peek() -> impl Filter<Extract = One<Peek>, Error = Never> + Copy {
         let path = path_and_query(&route);
         let idx = route.matched_path_index();
 
-        Ok(one(Peek {
+       future::ok(one(Peek {
             path,
             start_index: idx,
         }))
@@ -401,7 +402,7 @@ impl fmt::Debug for Peek {
 ///     });
 /// ```
 pub fn full() -> impl Filter<Extract = One<FullPath>, Error = Never> + Copy {
-    filter_fn(move |route| Ok(one(FullPath(path_and_query(&route)))))
+    filter_fn(move |route| future::ok(one(FullPath(path_and_query(&route)))))
 }
 
 /// Represents the full request path, returned by the `full()` filter.
@@ -423,7 +424,7 @@ impl fmt::Debug for FullPath {
 fn segment<F, U>(func: F) -> impl Filter<Extract = U, Error = Rejection> + Copy
 where
     F: Fn(&str) -> Result<U, Rejection> + Copy,
-    U: Tuple + Send,
+    U: Tuple + Send + 'static,
 {
     filter_fn(move |route| {
         let (u, idx) = {
@@ -432,10 +433,12 @@ where
                 .splitn(2, '/')
                 .next()
                 .expect("split always has at least 1");
-            (func(seg)?, seg.len())
+            (func(seg), seg.len())
         };
-        route.set_unmatched_path(idx);
-        Ok(u)
+        if u.is_ok() {
+            route.set_unmatched_path(idx);
+        }
+        future::ready(u)
     })
 }
 

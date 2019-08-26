@@ -331,7 +331,7 @@ impl Configured {
                         return Err(Forbidden::MethodNotAllowed);
                     }
                 } else {
-                    logcrate::trace!(
+                    log::trace!(
                         "preflight request missing access-control-request-method header"
                     );
                     return Err(Forbidden::MethodNotAllowed);
@@ -353,7 +353,7 @@ impl Configured {
             (Some(origin), _) => {
                 // Any other method, simply check for a valid origin...
 
-                logcrate::trace!("origin header: {:?}", origin);
+                log::trace!("origin header: {:?}", origin);
                 if self.is_origin_allowed(origin) {
                     Ok(Validated::Simple(origin.clone()))
                 } else {
@@ -413,8 +413,11 @@ impl Configured {
 
 mod internal {
     use std::sync::Arc;
+    use std::task::{Context, Poll};
+    use std::pin::Pin;
+    use std::future::Future;
 
-    use futures::{future, try_ready, Future, Poll};
+    use futures::{future, ready, TryFuture};
     use headers::Origin;
     use http::header;
 
@@ -434,13 +437,14 @@ mod internal {
     where
         F: Filter,
         F::Extract: Send,
+        F::Future: Future,
         F::Error: CombineRejection<Rejection>,
     {
         type Extract =
             One<Either<One<Preflight>, One<Either<One<Wrapped<F::Extract>>, F::Extract>>>>;
         type Error = <F::Error as CombineRejection<Rejection>>::Rejection;
         type Future = future::Either<
-            future::FutureResult<Self::Extract, Self::Error>,
+            future::Ready<Result<Self::Extract, Self::Error>>,
             WrappedFuture<F::Future>,
         >;
 
@@ -454,19 +458,19 @@ mod internal {
                         config: self.config.clone(),
                         origin,
                     };
-                    future::Either::A(future::ok((Either::A((preflight,)),)))
+                    future::Either::Left(future::ok((Either::A((preflight,)),)))
                 }
-                Ok(Validated::Simple(origin)) => future::Either::B(WrappedFuture {
+                Ok(Validated::Simple(origin)) => future::Either::Right(WrappedFuture {
                     inner: self.inner.filter(),
                     wrapped: Some((self.config.clone(), origin)),
                 }),
-                Ok(Validated::NotCors) => future::Either::B(WrappedFuture {
+                Ok(Validated::NotCors) => future::Either::Right(WrappedFuture {
                     inner: self.inner.filter(),
                     wrapped: None,
                 }),
                 Err(err) => {
                     let rejection = crate::reject::known(CorsForbidden { kind: err });
-                    future::Either::A(future::err(rejection.into()))
+                    future::Either::Left(future::err(rejection.into()))
                 }
             }
         }
@@ -516,25 +520,31 @@ mod internal {
 
     impl<F> Future for WrappedFuture<F>
     where
-        F: Future,
+        F: TryFuture,
         F::Error: CombineRejection<Rejection>,
     {
-        type Item = One<Either<One<Preflight>, One<Either<One<Wrapped<F::Item>>, F::Item>>>>;
-        type Error = <F::Error as CombineRejection<Rejection>>::Rejection;
+        type Output = Result<One<Either<One<Preflight>, One<Either<One<Wrapped<F::Ok>>, F::Ok>>>>, <F::Error as CombineRejection<Rejection>>::Rejection>;
 
-        fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-            let inner = try_ready!(self.inner.poll());
-            let item = if let Some((config, origin)) = self.wrapped.take() {
-                (Either::A((Wrapped {
-                    config,
-                    inner,
-                    origin,
-                },)),)
-            } else {
-                (Either::B(inner),)
-            };
-            let item = (Either::B(item),);
-            Ok(item.into())
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+            let pin = get_unchecked!(self);
+            let inner = &mut pin.inner;
+            match ready!(pin_unchecked!(inner).try_poll(cx)) {
+                Ok(inner) => {
+                    let item = if let Some((config, origin)) = pin.wrapped.take() {
+                        (Either::A((Wrapped {
+                            config,
+                            inner,
+                            origin,
+                        },)),)
+                    } else {
+                        (Either::B(inner),)
+                    };
+                    let item = (Either::B(item),);
+                    Poll::Ready(Ok(item))
+                },
+                Err(err) => Poll::Ready(Err(err.into())),
+            }
         }
     }
 

@@ -12,7 +12,7 @@ scoped_thread_local!(static ROUTE: RefCell<Route>);
 
 pub(crate) fn set<F, U>(r: &RefCell<Route>, func: F) -> U
 where
-    F: FnMut() -> U,
+    F: FnOnce() -> U,
 {
     ROUTE.set(r, func)
 }
