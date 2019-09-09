@@ -83,84 +83,84 @@
 //!
 //! [Filter]: trait.Filter.html
 
-// #[macro_use]
-// extern crate logcrate;
+#[macro_use]
+extern crate logcrate;
 
 mod error;
 mod filter;
-pub mod filters;
+// pub mod filters;
 mod generic;
 mod never;
-pub mod redirect;
+// pub mod redirect;
 pub mod reject;
-pub mod reply;
-mod route;
-mod server;
-// pub mod test;
-#[cfg(feature = "tls")]
-mod tls;
-mod transport;
+// pub mod reply;
+// mod route;
+// mod server;
+// // pub mod test;
+// #[cfg(feature = "tls")]
+// mod tls;
+// mod transport;
 
-pub use self::error::Error;
-pub use self::filter::Filter;
-// This otherwise shows a big dump of re-exports in the doc homepage,
-// with zero context, so just hide it from the docs. Doc examples
-// on each can show that a convenient import exists.
-#[cfg(feature = "multipart")]
-#[doc(hidden)]
-pub use self::filters::multipart;
-#[cfg(feature = "websocket")]
-#[doc(hidden)]
-pub use self::filters::ws;
-#[doc(hidden)]
-#[allow(deprecated)]
-pub use self::filters::{
-    addr,
-    // any() function
-    any::any,
-    body,
-    cookie,
-    // cookie() function
-    cookie::cookie,
-    // cors,
-    // cors() function
-    // cors::cors,
-    ext,
-    fs,
-    header,
-    // header() function
-    header::header,
-    log,
-    // log() function
-    log::log,
-    method::{delete, get, method, post, put},
-    method::{delete2, get2, post2, put2},
-    method::{head, options, patch},
-    path,
-    // the index() function
-    path::index,
-    // path() function
-    path::path,
-    query,
-    // query() function
-    query::query,
-    sse,
-    // sse() function
-    sse::sse,
-};
-// ws() function
+// pub use self::error::Error;
+// pub use self::filter::Filter;
+// // This otherwise shows a big dump of re-exports in the doc homepage,
+// // with zero context, so just hide it from the docs. Doc examples
+// // on each can show that a convenient import exists.
+// #[cfg(feature = "multipart")]
+// #[doc(hidden)]
+// pub use self::filters::multipart;
 // #[cfg(feature = "websocket")]
 // #[doc(hidden)]
+// pub use self::filters::ws;
+// #[doc(hidden)]
 // #[allow(deprecated)]
-// pub use self::filters::ws::{ws, ws2};
-#[doc(hidden)]
-pub use self::redirect::redirect;
-#[doc(hidden)]
-#[allow(deprecated)]
-pub use self::reject::{reject, Rejection};
-#[doc(hidden)]
-pub use self::reply::{reply, Reply};
-pub use self::server::{serve, Server};
+// pub use self::filters::{
+//     addr,
+//     // any() function
+//     any::any,
+//     body,
+//     cookie,
+//     // cookie() function
+//     cookie::cookie,
+//     // cors,
+//     // cors() function
+//     // cors::cors,
+//     ext,
+//     fs,
+//     header,
+//     // header() function
+//     header::header,
+//     log,
+//     // log() function
+//     log::log,
+//     method::{delete, get, method, post, put},
+//     method::{delete2, get2, post2, put2},
+//     method::{head, options, patch},
+//     path,
+//     // the index() function
+//     path::index,
+//     // path() function
+//     path::path,
+//     query,
+//     // query() function
+//     query::query,
+//     sse,
+//     // sse() function
+//     sse::sse,
+// };
+// // ws() function
+// // #[cfg(feature = "websocket")]
+// // #[doc(hidden)]
+// // #[allow(deprecated)]
+// // pub use self::filters::ws::{ws, ws2};
+// #[doc(hidden)]
+// pub use self::redirect::redirect;
+// #[doc(hidden)]
+// #[allow(deprecated)]
+// pub use self::reject::{reject, Rejection};
+// #[doc(hidden)]
+// pub use self::reply::{reply, Reply};
+// pub use self::server::{serve, Server};
 pub use hyper::rt::spawn;
 
 #[doc(hidden)]
