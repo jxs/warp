@@ -18,8 +18,7 @@ pub struct Recover<T, F> {
 impl<T, F> FilterBase for Recover<T, F>
 where
     T: Filter,
-    T::Future: Unpin,
-    F: Func<T::Error> + Clone + Send,
+    F: Func<T::Error> + Clone + Send + Unpin,
     F::Output: TryFuture<Error = T::Error> + Send + Unpin,
 {
     type Extract = (Either<T::Extract, (<F::Output as TryFuture>::Ok,)>,);
@@ -68,16 +67,15 @@ impl PathIndex {
 impl<T, F> Future for RecoverFuture<T, F>
 where
     T: Filter,
-    T::Future: Unpin,
-    F: Func<T::Error>,
+    F: Func<T::Error> + Unpin,
     F::Output: TryFuture<Error = T::Error> + Send + Unpin,
 {
     // type Item = (Either<T::Extract, (<F::Output as IntoFuture>::Item,)>,);
     // type Error = <F::Output as IntoFuture>::Error;
     type Output = Result<(Either<T::Extract, (<F::Output as TryFuture>::Ok,)>,), <F::Output as TryFuture>::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let err = match self.state {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let err = match (*self).state {
             State::First(ref mut first, _) => match Pin::new(first).try_poll(cx) {
                 Poll::Ready(Ok(ex)) => return Poll::Ready(Ok((Either::A(ex),))),
                 Poll::Pending => return Poll::Pending,

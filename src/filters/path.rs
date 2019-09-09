@@ -433,7 +433,7 @@ where
                 .splitn(2, '/')
                 .next()
                 .expect("split always has at least 1");
-            (func(seg)?, seg.len())
+            (func(seg), seg.len())
         };
         route.set_unmatched_path(idx);
         future::ok(u)

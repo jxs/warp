@@ -15,8 +15,7 @@ pub struct Map<T, F> {
 impl<T, F> FilterBase for Map<T, F>
 where
     T: Filter,
-    T::Future: Unpin,
-    F: Func<T::Extract> + Clone + Send,
+    F: Func<T::Extract> + Clone + Send + Unpin,
 {
     type Extract = (F::Output,);
     type Error = T::Error;
@@ -39,14 +38,13 @@ pub struct MapFuture<T: Filter, F> {
 impl<T, F> Future for MapFuture<T, F>
 where
     T: Filter,
-    T::Future: Unpin,
-    F: Func<T::Extract>,
+    F: Func<T::Extract> + Unpin,
 {
     type Output = Result<(F::Output,), T::Error>;
 
     #[inline]
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        match ready!(Pin::new(&mut self.extract).try_poll(cx)) {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        match ready!(Pin::new(&mut (*self).extract).try_poll(cx)) {
             Ok(ex) => {
                 let ex = (self.callback.call(ex),);
                 Poll::Ready(Ok(ex))

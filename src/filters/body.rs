@@ -64,154 +64,154 @@ pub fn content_length_limit(limit: u64) -> impl Filter<Extract = (), Error = Rej
         .untuple_one()
 }
 
-/// Create a `Filter` that extracts the request body as a `futures::Stream`.
-///
-/// If other filters have already extracted the body, this filter will reject
-/// with a `500 Internal Server Error`.
-///
-/// # Warning
-///
-/// This does not have a default size limit, it would be wise to use one to
-/// prevent a overly large request from using too much memory.
-pub fn stream() -> impl Filter<Extract = (BodyStream,), Error = Rejection> + Copy {
-    body().map(|body: Body| BodyStream { body })
-}
+// /// Create a `Filter` that extracts the request body as a `futures::Stream`.
+// ///
+// /// If other filters have already extracted the body, this filter will reject
+// /// with a `500 Internal Server Error`.
+// ///
+// /// # Warning
+// ///
+// /// This does not have a default size limit, it would be wise to use one to
+// /// prevent a overly large request from using too much memory.
+// pub fn stream() -> impl Filter<Extract = (BodyStream,), Error = Rejection> + Copy {
+//     body().map(|body: Body| BodyStream { body })
+// }
 
-/// Returns a `Filter` that matches any request and extracts a `Future` of a
-/// concatenated body.
-///
-/// # Warning
-///
-/// This does not have a default size limit, it would be wise to use one to
-/// prevent a overly large request from using too much memory.
-///
-/// # Example
-///
-/// ```
-/// use warp::{Buf, Filter};
-///
-/// let route = warp::body::content_length_limit(1024 * 32)
-///     .and(warp::body::concat())
-///     .map(|mut full_body: warp::body::FullBody| {
-///         // FullBody is a `Buf`, which could have several non-contiguous
-///         // slices of memory...
-///         let mut remaining = full_body.remaining();
-///         while remaining != 0 {
-///             println!("slice = {:?}", full_body.bytes());
-///             let cnt = full_body.bytes().len();
-///             full_body.advance(cnt);
-///             remaining -= cnt;
-///         }
-///     });
-/// ```
-pub fn concat() -> impl Filter<Extract = (FullBody,), Error = Rejection> + Copy {
-    body().and_then(|body: ::hyper::Body| Concat {
-        fut: body.try_concat(),
-    })
-}
+// /// Returns a `Filter` that matches any request and extracts a `Future` of a
+// /// concatenated body.
+// ///
+// /// # Warning
+// ///
+// /// This does not have a default size limit, it would be wise to use one to
+// /// prevent a overly large request from using too much memory.
+// ///
+// /// # Example
+// ///
+// /// ```
+// /// use warp::{Buf, Filter};
+// ///
+// /// let route = warp::body::content_length_limit(1024 * 32)
+// ///     .and(warp::body::concat())
+// ///     .map(|mut full_body: warp::body::FullBody| {
+// ///         // FullBody is a `Buf`, which could have several non-contiguous
+// ///         // slices of memory...
+// ///         let mut remaining = full_body.remaining();
+// ///         while remaining != 0 {
+// ///             println!("slice = {:?}", full_body.bytes());
+// ///             let cnt = full_body.bytes().len();
+// ///             full_body.advance(cnt);
+// ///             remaining -= cnt;
+// ///         }
+// ///     });
+// /// ```
+// pub fn concat() -> impl Filter<Extract = (FullBody,), Error = Rejection> + Copy {
+//     body().and_then(|body: ::hyper::Body| Concat {
+//         fut: body.try_concat(),
+//     })
+// }
 
-// Require the `content-type` header to be this type (or, if there's no `content-type`
-// header at all, optimistically hope it's the right type).
-fn is_content_type(
-    type_: mime::Name<'static>,
-    subtype: mime::Name<'static>,
-) -> impl Filter<Extract = (), Error = Rejection> + Copy {
-    filter_fn(move |route| {
-        if let Some(value) = route.headers().get(CONTENT_TYPE) {
-            logcrate::trace!("is_content_type {}/{}? {:?}", type_, subtype, value);
-            let ct = value
-                .to_str()
-                .ok()
-                .and_then(|s| s.parse::<mime::Mime>().ok());
-            if let Some(ct) = ct {
-                if ct.type_() == type_ && ct.subtype() == subtype {
-                    future::ok(())
-                } else {
-                    logcrate::debug!(
-                        "content-type {:?} doesn't match {}/{}",
-                        value,
-                        type_,
-                        subtype
-                    );
-                    future::err(reject::unsupported_media_type())
-                }
-            } else {
-                logcrate::debug!("content-type {:?} couldn't be parsed", value);
-                future::err(reject::unsupported_media_type())
-            }
-        } else {
-            // Optimistically assume its correct!
-            logcrate::trace!("no content-type header, assuming {}/{}", type_, subtype);
-            future::ok(())
-        }
-    })
-}
+// // Require the `content-type` header to be this type (or, if there's no `content-type`
+// // header at all, optimistically hope it's the right type).
+// fn is_content_type(
+//     type_: mime::Name<'static>,
+//     subtype: mime::Name<'static>,
+// ) -> impl Filter<Extract = (), Error = Rejection> + Copy {
+//     filter_fn(move |route| {
+//         if let Some(value) = route.headers().get(CONTENT_TYPE) {
+//             logcrate::trace!("is_content_type {}/{}? {:?}", type_, subtype, value);
+//             let ct = value
+//                 .to_str()
+//                 .ok()
+//                 .and_then(|s| s.parse::<mime::Mime>().ok());
+//             if let Some(ct) = ct {
+//                 if ct.type_() == type_ && ct.subtype() == subtype {
+//                     future::ok(())
+//                 } else {
+//                     logcrate::debug!(
+//                         "content-type {:?} doesn't match {}/{}",
+//                         value,
+//                         type_,
+//                         subtype
+//                     );
+//                     future::err(reject::unsupported_media_type())
+//                 }
+//             } else {
+//                 logcrate::debug!("content-type {:?} couldn't be parsed", value);
+//                 future::err(reject::unsupported_media_type())
+//             }
+//         } else {
+//             // Optimistically assume its correct!
+//             logcrate::trace!("no content-type header, assuming {}/{}", type_, subtype);
+//             future::ok(())
+//         }
+//     })
+// }
 
-/// Returns a `Filter` that matches any request and extracts a `Future` of a
-/// JSON-decoded body.
-///
-/// # Warning
-///
-/// This does not have a default size limit, it would be wise to use one to
-/// prevent a overly large request from using too much memory.
-///
-/// # Example
-///
-/// ```
-/// use std::collections::HashMap;
-/// use warp::Filter;
-///
-/// let route = warp::body::content_length_limit(1024 * 32)
-///     .and(warp::body::json())
-///     .map(|simple_map: HashMap<String, String>| {
-///         "Got a JSON body!"
-///     });
-/// ```
-pub fn json<T: DeserializeOwned + Send>() -> impl Filter<Extract = (T,), Error = Rejection> + Copy {
-    is_content_type(mime::APPLICATION, mime::JSON)
-        .and(concat())
-        .and_then(|buf: FullBody| {
-            serde_json::from_slice(&buf.chunk).map_err(|err| {
-                logcrate::debug!("request json body error: {}", err);
-                reject::known(BodyDeserializeError { cause: err.into() })
-            })
-        })
-}
+// /// Returns a `Filter` that matches any request and extracts a `Future` of a
+// /// JSON-decoded body.
+// ///
+// /// # Warning
+// ///
+// /// This does not have a default size limit, it would be wise to use one to
+// /// prevent a overly large request from using too much memory.
+// ///
+// /// # Example
+// ///
+// /// ```
+// /// use std::collections::HashMap;
+// /// use warp::Filter;
+// ///
+// /// let route = warp::body::content_length_limit(1024 * 32)
+// ///     .and(warp::body::json())
+// ///     .map(|simple_map: HashMap<String, String>| {
+// ///         "Got a JSON body!"
+// ///     });
+// /// ```
+// pub fn json<T: DeserializeOwned + Send>() -> impl Filter<Extract = (T,), Error = Rejection> + Copy {
+//     is_content_type(mime::APPLICATION, mime::JSON)
+//         .and(concat())
+//         .and_then(|buf: FullBody| {
+//             serde_json::from_slice(&buf.chunk).map_err(|err| {
+//                 logcrate::debug!("request json body error: {}", err);
+//                 reject::known(BodyDeserializeError { cause: err.into() })
+//             })
+//         })
+// }
 
-/// Returns a `Filter` that matches any request and extracts a
-/// `Future` of a form encoded body.
-///
-/// # Note
-///
-/// This filter is for the simpler `application/x-www-form-urlencoded` format,
-/// not `multipart/form-data`.
-///
-/// # Warning
-///
-/// This does not have a default size limit, it would be wise to use one to
-/// prevent a overly large request from using too much memory.
-///
-///
-/// ```
-/// use std::collections::HashMap;
-/// use warp::Filter;
-///
-/// let route = warp::body::content_length_limit(1024 * 32)
-///     .and(warp::body::form())
-///     .map(|simple_map: HashMap<String, String>| {
-///         "Got a urlencoded body!"
-///     });
-/// ```
-pub fn form<T: DeserializeOwned + Send>() -> impl Filter<Extract = (T,), Error = Rejection> + Copy {
-    is_content_type(mime::APPLICATION, mime::WWW_FORM_URLENCODED)
-        .and(concat())
-        .and_then(|buf: FullBody| {
-            serde_urlencoded::from_bytes(&buf.chunk).map_err(|err| {
-                logcrate::debug!("request form body error: {}", err);
-                reject::known(BodyDeserializeError { cause: err.into() })
-            })
-        })
-}
+// /// Returns a `Filter` that matches any request and extracts a
+// /// `Future` of a form encoded body.
+// ///
+// /// # Note
+// ///
+// /// This filter is for the simpler `application/x-www-form-urlencoded` format,
+// /// not `multipart/form-data`.
+// ///
+// /// # Warning
+// ///
+// /// This does not have a default size limit, it would be wise to use one to
+// /// prevent a overly large request from using too much memory.
+// ///
+// ///
+// /// ```
+// /// use std::collections::HashMap;
+// /// use warp::Filter;
+// ///
+// /// let route = warp::body::content_length_limit(1024 * 32)
+// ///     .and(warp::body::form())
+// ///     .map(|simple_map: HashMap<String, String>| {
+// ///         "Got a urlencoded body!"
+// ///     });
+// /// ```
+// pub fn form<T: DeserializeOwned + Send>() -> impl Filter<Extract = (T,), Error = Rejection> + Copy {
+//     is_content_type(mime::APPLICATION, mime::WWW_FORM_URLENCODED)
+//         .and(concat())
+//         .and_then(|buf: FullBody| {
+//             serde_urlencoded::from_bytes(&buf.chunk).map_err(|err| {
+//                 logcrate::debug!("request form body error: {}", err);
+//                 reject::known(BodyDeserializeError { cause: err.into() })
+//             })
+//         })
+// }
 
 /// The full contents of a request body.
 ///
@@ -259,7 +259,7 @@ impl Future for Concat {
     type Output = Result<FullBody, Rejection>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        match ready!(Pin::new(&mut self.fut).try_poll(cx)) {
+        match ready!(Pin::new(&mut self.get_mut().fut).try_poll(cx)) {
             Ok(chunk) => Poll::Ready(Ok(FullBody { chunk })),
             Err(err) => {
                 logcrate::debug!("concat error: {}", err);
@@ -280,7 +280,7 @@ impl Stream for BodyStream {
     type Item = Result<StreamBuf, crate::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let mut opt_item: Option<Result<Chunk, hyper::Error>> = ready!(Pin::new(&mut self.body).poll_next(cx));
+        let mut opt_item: Option<Result<Chunk, hyper::Error>> = ready!(Pin::new(&mut self.get_mut().body).poll_next(cx));
 
         match opt_item {
             None =>  Poll::Ready(None),

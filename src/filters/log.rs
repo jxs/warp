@@ -94,7 +94,7 @@ pub struct Info<'a> {
 
 impl<FN, F> WrapSealed<F> for Log<FN>
 where
-    FN: Fn(Info) + Clone + Send,
+    FN: Fn(Info) + Clone + Send + Unpin,
     F: Filter + Clone + Send,
     F::Extract: Reply,
     F::Error: Reject,
@@ -211,7 +211,7 @@ mod internal {
 
     impl<FN, F> FilterBase for WithLog<FN, F>
     where
-        FN: Fn(Info) + Clone + Send,
+        FN: Fn(Info) + Clone + Send + Unpin,
         F: Filter + Clone + Send,
         F::Extract: Reply,
         F::Error: Reject,
@@ -240,7 +240,7 @@ mod internal {
 
     impl<FN, F> Future for WithLogFuture<FN, F>
     where
-        FN: Fn(Info),
+        FN: Fn(Info) + Unpin,
         F: TryFuture + Unpin,
         F::Ok: Reply,
         F::Error: Reject,
@@ -248,7 +248,8 @@ mod internal {
         type Output = Result<(Logged,), F::Error>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-            let (result, status) = match Pin::new(&mut self.future).try_poll(cx) {
+            let ref_mut = self.get_mut();
+            let (result, status) = match Pin::new(&mut ref_mut.future).try_poll(cx) {
                 Poll::Ready(Ok(reply)) => {
                     let resp = reply.into_response();
                     let status = resp.status();
@@ -263,9 +264,9 @@ mod internal {
             };
 
             route::with(|route| {
-                (self.log.func)(Info {
+                (ref_mut.log.func)(Info {
                     route,
-                    start: self.started,
+                    start: ref_mut.started,
                     status,
                 });
             });

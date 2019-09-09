@@ -17,8 +17,7 @@ pub struct AndThen<T, F> {
 impl<T, F> FilterBase for AndThen<T, F>
 where
     T: Filter,
-    T::Future: Unpin,
-    F: Func<T::Extract> + Clone + Send,
+    F: Func<T::Extract> + Clone + Send + Unpin,
     F::Output: TryFuture + Send + Unpin,
     <F::Output as TryFuture>::Error: CombineRejection<T::Error>,
 {
@@ -59,16 +58,15 @@ where
 impl<T, F> Future for AndThenFuture<T, F>
 where
     T: Filter,
-    T::Future: Unpin,
-    F: Func<T::Extract>,
+    F: Func<T::Extract> + Unpin,
     F::Output: TryFuture + Send + Unpin,
     <F::Output as TryFuture>::Error: CombineRejection<T::Error>,
 {
     type Output = Result<(<F::Output as TryFuture>::Ok,),
                          <<F::Output as TryFuture>::Error as CombineRejection<T::Error>>::Rejection>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let ex1 = match self.state {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let ex1 = match (*self).state {
             State::First(ref mut first, _) => match ready!(Pin::new(first).try_poll(cx)) {
                 Ok(first) => first,
                 Err(err) => return Poll::Ready(Err(From::from(err)))

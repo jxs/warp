@@ -14,7 +14,6 @@ pub struct Unify<F> {
 impl<F, T> FilterBase for Unify<F>
 where
     F: Filter<Extract = (Either<T, T>,)>,
-    F::Future: Unpin,
     T: Tuple,
 {
     type Extract = T;
@@ -41,7 +40,7 @@ where
 
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let unified = match ready!(Pin::new(&mut self.inner).try_poll(cx)) {
+        let unified = match ready!(Pin::new(&mut self.get_mut().inner).try_poll(cx)) {
             Ok((Either::A(a),)) => Ok(a),
             Ok((Either::B(b),)) => Ok(b),
             Err(err) => Err(err)

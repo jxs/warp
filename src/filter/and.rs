@@ -19,10 +19,8 @@ pub struct And<T, U> {
 impl<T, U> FilterBase for And<T, U>
 where
     T: Filter,
-    T::Future: Unpin,
-    U: Filter + Clone + Send + Unpin,
-    U::Future: Unpin,
     T::Extract: Send + Unpin,
+    U: Filter + Clone + Send + Unpin,
     <T::Extract as Tuple>::HList: Combine<<U::Extract as Tuple>::HList> + Send,
     <<<T::Extract as Tuple>::HList as Combine<<U::Extract as Tuple>::HList>>::Output as HList>::Tuple: Send,
     U::Error: CombineRejection<T::Error>,
@@ -52,22 +50,18 @@ enum State<T: Filter, U: Filter> {
 impl<T, U> Future for AndFuture<T, U>
 where
     T: Filter,
-    T::Future: Unpin,
     T::Extract: Unpin,
     U: Filter + Unpin,
-    U::Future: Unpin,
     //T::Extract: Combine<U::Extract>,
     <T::Extract as Tuple>::HList: Combine<<U::Extract as Tuple>::HList> + Send,
     U::Error: CombineRejection<T::Error>,
 {
-    //type Item = <T::Extract as Combine<U::Extract>>::Output;
     type Output = Result<
             <<<T::Extract as Tuple>::HList as Combine<<U::Extract as Tuple>::HList>>::Output as HList>::Tuple,
         <U::Error as CombineRejection<T::Error>>::Rejection>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let ref_mut = self.get_mut();
-        let ex1 = match ref_mut.state {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let ex1 = match (*self).state {
             State::First(ref mut first, _) => match ready!(Pin::new(first).try_poll(cx)) {
                 Ok(first) => first,
                 Err(err) => return Poll::Ready(Err(From::from(err)))
@@ -84,7 +78,7 @@ where
             State::Done => panic!("polled after complete"),
         };
 
-        let mut second = match mem::replace(&mut ref_mut.state, State::Done) {
+        let mut second = match mem::replace(&mut self.state, State::Done) {
             State::First(_, second) => second.filter(),
             _ => unreachable!(),
         };
@@ -92,7 +86,7 @@ where
         match Pin::new(&mut second).try_poll(cx)? {
             Poll::Ready(ex2) => Poll::Ready(Ok(ex1.hlist().combine(ex2.hlist()).flatten())),
             Poll::Pending => {
-                ref_mut.state = State::Second(Some(ex1), second);
+                self.state = State::Second(Some(ex1), second);
                 Poll::Pending
             }
         }

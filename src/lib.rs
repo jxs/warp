@@ -91,19 +91,19 @@ mod filter;
 pub mod filters;
 mod generic;
 mod never;
-// pub mod redirect;
+pub mod redirect;
 pub mod reject;
 pub mod reply;
-// mod route;
+mod route;
 // mod server;
 // // pub mod test;
 // #[cfg(feature = "tls")]
 // mod tls;
-// mod transport;
+mod transport;
 
-// pub use self::error::Error;
-// pub use self::filter::Filter;
-// // This otherwise shows a big dump of re-exports in the doc homepage,
+pub use self::error::Error;
+pub use self::filter::Filter;
+// This otherwise shows a big dump of re-exports in the doc homepage,
 // // with zero context, so just hide it from the docs. Doc examples
 // // on each can show that a convenient import exists.
 // #[cfg(feature = "multipart")]
@@ -114,10 +114,10 @@ pub mod reply;
 // pub use self::filters::ws;
 // #[doc(hidden)]
 // #[allow(deprecated)]
-// pub use self::filters::{
-//     addr,
-//     // any() function
-//     any::any,
+pub use self::filters::{
+    addr,
+    // any() function
+    any::any,
 //     body,
 //     cookie,
 //     // cookie() function
@@ -127,12 +127,12 @@ pub mod reply;
 //     // cors::cors,
 //     ext,
 //     fs,
-//     header,
-//     // header() function
-//     header::header,
-//     log,
-//     // log() function
-//     log::log,
+    header,
+    // header() function
+    header::header,
+    log,
+    // log() function
+    log::log,
 //     method::{delete, get, method, post, put},
 //     method::{delete2, get2, post2, put2},
 //     method::{head, options, patch},
@@ -147,7 +147,7 @@ pub mod reply;
 //     sse,
 //     // sse() function
 //     sse::sse,
-// };
+};
 // // ws() function
 // // #[cfg(feature = "websocket")]
 // // #[doc(hidden)]

@@ -17,8 +17,7 @@ pub struct OrElse<T, F> {
 impl<T, F> FilterBase for OrElse<T, F>
 where
     T: Filter,
-    T::Future: Unpin,
-    F: Func<T::Error> + Clone + Send,
+    F: Func<T::Error> + Clone + Send + Unpin,
     F::Output: TryFuture<Ok =  T::Extract, Error = T::Error> + Send + Unpin,
 {
     type Extract = <F::Output as TryFuture>::Ok;
@@ -67,14 +66,13 @@ impl PathIndex {
 impl<T, F> Future for OrElseFuture<T, F>
 where
     T: Filter,
-    T::Future: Unpin,
-    F: Func<T::Error>,
+    F: Func<T::Error> + Unpin,
     F::Output: TryFuture<Ok =  T::Extract, Error = T::Error> + Send + Unpin,
 {
     type Output = Result<<F::Output as TryFuture>::Ok, <F::Output as TryFuture>::Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let err = match self.state {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let err = match (*self).state {
             State::First(ref mut first, _) => match Pin::new(first).try_poll(cx) {
                 Poll::Ready(Ok(ex)) => return Poll::Ready(Ok(ex)),
                 Poll::Pending => return Poll::Pending,

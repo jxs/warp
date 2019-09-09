@@ -25,7 +25,7 @@ impl<T: AsyncRead + Unpin> AsyncRead for LiftIo<T> {
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.0).poll_read(cx, buf)
+        Pin::new(&mut self.get_mut().0).poll_read(cx, buf)
     }
 }
 
@@ -35,15 +35,15 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for LiftIo<T> {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.0).poll_write(cx, buf)
+        Pin::new(&mut self.get_mut().0).poll_write(cx, buf)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        Pin::new(&mut self.0).poll_flush(cx)
+        Pin::new(&mut self.get_mut().0).poll_flush(cx)
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        Pin::new(&mut self.0).poll_shutdown(cx)
+        Pin::new(&mut self.get_mut().0).poll_shutdown(cx)
     }
 }
 

@@ -19,10 +19,9 @@ pub struct Or<T, U> {
 impl<T, U> FilterBase for Or<T, U>
 where
     T: Filter,
-    T::Future: Unpin,
-    U: Filter + Clone + Send,
-    U::Future: Unpin,
-    U::Error: CombineRejection<T::Error>,
+    T::Error: Unpin,
+    U: Filter + Clone + Send + Unpin,
+    U::Error: CombineRejection<T::Error> + Unpin,
 {
     type Extract = (Either<T::Extract, U::Extract>,);
     type Error = <U::Error as CombineRejection<T::Error>>::Rejection;
@@ -60,15 +59,15 @@ impl PathIndex {
 impl<T, U> Future for EitherFuture<T, U>
 where
     T: Filter,
-    T::Future: Unpin,
-    U: Filter,
-    U::Future: Unpin,
-    U::Error: CombineRejection<T::Error>,
+    T::Error: Unpin,
+    U: Filter + Unpin,
+    U::Error: CombineRejection<T::Error> + Unpin,
 {
     type Output = Result<(Either<T::Extract, U::Extract>,), <U::Error as CombineRejection<T::Error>>::Rejection>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let err1 = match self.state {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let pin = self.get_mut();
+        let err1 = match pin.state {
             State::First(ref mut first, _) => match Pin::new(first).try_poll(cx) {
                 Poll::Ready(Ok(ex1)) => {
                     return Poll::Ready(Ok((Either::A(ex1),)));
@@ -82,7 +81,7 @@ where
                     Poll::Pending => Poll::Pending,
 
                     Poll::Ready(Err(e)) => {
-                        self.original_path_index.reset_path();
+                        pin.original_path_index.reset_path();
                         let err1 = err1.take().expect("polled after complete");
                         Poll::Ready(Err(e.combine(err1)))
                     }
@@ -91,9 +90,9 @@ where
             State::Done => panic!("polled after complete"),
         };
 
-        self.original_path_index.reset_path();
+        pin.original_path_index.reset_path();
 
-        let mut second = match mem::replace(&mut self.state, State::Done) {
+        let mut second = match mem::replace(&mut pin.state, State::Done) {
             State::First(_, second) => second.filter(),
             _ => unreachable!(),
         };
@@ -101,11 +100,11 @@ where
         match Pin::new(&mut second).try_poll(cx) {
             Poll::Ready(Ok(ex2)) => Poll::Ready(Ok((Either::B(ex2),))),
             Poll::Pending => {
-                self.state = State::Second(Some(err1), second);
+                pin.state = State::Second(Some(err1), second);
                 Poll::Pending
             }
             Poll::Ready(Err(e)) => {
-                self.original_path_index.reset_path();
+                pin.original_path_index.reset_path();
                 return Poll::Ready(Err(e.combine(err1)));
             }
         }
