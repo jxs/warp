@@ -20,9 +20,9 @@ impl<T, U> FilterBase for And<T, U>
 where
     T: Filter,
     T::Future: Unpin,
-    U: Filter + Clone + Send,
+    U: Filter + Clone + Send + Unpin,
     U::Future: Unpin,
-    T::Extract: Send,
+    T::Extract: Send + Unpin,
     <T::Extract as Tuple>::HList: Combine<<U::Extract as Tuple>::HList> + Send,
     <<<T::Extract as Tuple>::HList as Combine<<U::Extract as Tuple>::HList>>::Output as HList>::Tuple: Send,
     U::Error: CombineRejection<T::Error>,
@@ -53,7 +53,8 @@ impl<T, U> Future for AndFuture<T, U>
 where
     T: Filter,
     T::Future: Unpin,
-    U: Filter,
+    T::Extract: Unpin,
+    U: Filter + Unpin,
     U::Future: Unpin,
     //T::Extract: Combine<U::Extract>,
     <T::Extract as Tuple>::HList: Combine<<U::Extract as Tuple>::HList> + Send,
@@ -65,7 +66,8 @@ where
         <U::Error as CombineRejection<T::Error>>::Rejection>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let ex1 = match self.state {
+        let ref_mut = self.get_mut();
+        let ex1 = match ref_mut.state {
             State::First(ref mut first, _) => match ready!(Pin::new(first).try_poll(cx)) {
                 Ok(first) => first,
                 Err(err) => return Poll::Ready(Err(From::from(err)))
@@ -82,7 +84,7 @@ where
             State::Done => panic!("polled after complete"),
         };
 
-        let mut second = match mem::replace(&mut self.state, State::Done) {
+        let mut second = match mem::replace(&mut ref_mut.state, State::Done) {
             State::First(_, second) => second.filter(),
             _ => unreachable!(),
         };
@@ -90,7 +92,7 @@ where
         match Pin::new(&mut second).try_poll(cx)? {
             Poll::Ready(ex2) => Poll::Ready(Ok(ex1.hlist().combine(ex2.hlist()).flatten())),
             Poll::Pending => {
-                self.state = State::Second(Some(ex1), second);
+                ref_mut.state = State::Second(Some(ex1), second);
                 Poll::Pending
             }
         }

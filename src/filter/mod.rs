@@ -1,4 +1,4 @@
-// mod and;
+mod and;
 // mod and_then;
 // mod boxed;
 // mod map;
@@ -16,7 +16,7 @@ mod map_err;
 use futures::{future, TryFuture, TryFutureExt};
 
 // pub(crate) use crate::generic::{one, Combine, Either, Func, HList, One, Tuple};
-pub(crate) use crate::generic::{Tuple};
+pub(crate) use crate::generic::{Combine, HList, Tuple};
 // use crate::reject::{CombineRejection, Reject, Rejection};
 use crate::reject::{Reject};
 // use crate::route::{self, Route};
@@ -70,28 +70,28 @@ pub trait FilterBase {
 //     let _ = crate::any().filter();
 // }
 
-// /// Composable request filters.
-// ///
-// /// A `Filter` can optionally extract some data from a request, combine
-// /// it with others, mutate it, and return back some value as a reply. The
-// /// power of `Filter`s come from being able to isolate small subsets, and then
-// /// chain and reuse them in various parts of your app.
-// ///
-// /// # Extracting Tuples
-// ///
-// /// You may notice that several of these filters extract some tuple, often
-// /// times a tuple of just 1 item! Why?
-// ///
-// /// If a filter extracts a `(String,)`, that simply means that it
-// /// extracts a `String`. If you were to `map` the filter, the argument type
-// /// would be exactly that, just a `String`.
-// ///
-// /// What is it? It's just some type magic that allows for automatic combining
-// /// and flattening of tuples. Without it, combining two filters together with
-// /// `and`, where one extracted `()`, and another `String`, would mean the
-// /// `map` would be given a single argument of `((), String,)`, which is just
-// /// no fun.
-// pub trait Filter: FilterBase {
+/// Composable request filters.
+///
+/// A `Filter` can optionally extract some data from a request, combine
+/// it with others, mutate it, and return back some value as a reply. The
+/// power of `Filter`s come from being able to isolate small subsets, and then
+/// chain and reuse them in various parts of your app.
+///
+/// # Extracting Tuples
+///
+/// You may notice that several of these filters extract some tuple, often
+/// times a tuple of just 1 item! Why?
+///
+/// If a filter extracts a `(String,)`, that simply means that it
+/// extracts a `String`. If you were to `map` the filter, the argument type
+/// would be exactly that, just a `String`.
+///
+/// What is it? It's just some type magic that allows for automatic combining
+/// and flattening of tuples. Without it, combining two filters together with
+/// `and`, where one extracted `()`, and another `String`, would mean the
+/// `map` would be given a single argument of `((), String,)`, which is just
+/// no fun.
+pub trait Filter: FilterBase {
 //     /// Composes a new `Filter` that requires both this and the other to filter a request.
 //     ///
 //     /// Additionally, this will join together the extracted values of both
@@ -400,7 +400,7 @@ pub trait FilterBase {
 //     {
 //         BoxedFilter::new(self)
 //     }
-// }
+}
 
 // impl<T: FilterBase> Filter for T {}
 
@@ -412,7 +412,7 @@ pub trait FilterBase {
 //     fn _assert(_f: &dyn Filter<Extract = (), Error = (), Future = future::Ready<()>>) {}
 // }
 
-// // ===== FilterFn =====
+// ===== FilterFn =====
 
 // pub(crate) fn filter_fn<F, U>(func: F) -> FilterFn<F>
 // where

@@ -88,12 +88,12 @@ extern crate logcrate;
 
 mod error;
 mod filter;
-// pub mod filters;
+pub mod filters;
 mod generic;
 mod never;
 // pub mod redirect;
 pub mod reject;
-// pub mod reply;
+pub mod reply;
 // mod route;
 // mod server;
 // // pub mod test;

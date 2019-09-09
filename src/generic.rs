@@ -1,18 +1,18 @@
-// #[derive(Debug)]
-// pub struct Product<H, T: HList>(pub(crate) H, pub(crate) T);
+#[derive(Debug)]
+pub struct Product<H, T: HList>(pub(crate) H, pub(crate) T);
 
-// pub type One<T> = (T,);
+pub type One<T> = (T,);
 
-// #[inline]
-// pub(crate) fn one<T>(val: T) -> One<T> {
-//     (val,)
-// }
+#[inline]
+pub(crate) fn one<T>(val: T) -> One<T> {
+    (val,)
+}
 
-// #[derive(Debug)]
-// pub enum Either<T, U> {
-//     A(T),
-//     B(U),
-// }
+#[derive(Debug)]
+pub enum Either<T, U> {
+    A(T),
+    B(U),
+}
 
 // Converts Product (and ()) into tuples.
 pub trait HList: Sized {
@@ -28,70 +28,70 @@ pub trait Tuple: Sized {
     fn hlist(self) -> Self::HList;
 }
 
-// // Combines Product together.
-// pub trait Combine<T: HList> {
-//     type Output: HList;
+// Combines Product together.
+pub trait Combine<T: HList> {
+    type Output: HList;
 
-//     fn combine(self, other: T) -> Self::Output;
-// }
+    fn combine(self, other: T) -> Self::Output;
+}
 
-// pub trait Func<Args> {
-//     type Output;
+pub trait Func<Args> {
+    type Output;
 
-//     fn call(&self, args: Args) -> Self::Output;
-// }
+    fn call(&self, args: Args) -> Self::Output;
+}
 
-// // ===== impl Combine =====
+// ===== impl Combine =====
 
-// impl<T: HList> Combine<T> for () {
-//     type Output = T;
-//     #[inline]
-//     fn combine(self, other: T) -> Self::Output {
-//         other
-//     }
-// }
+impl<T: HList> Combine<T> for () {
+    type Output = T;
+    #[inline]
+    fn combine(self, other: T) -> Self::Output {
+        other
+    }
+}
 
-// impl<H, T: HList, U: HList> Combine<U> for Product<H, T>
-// where
-//     T: Combine<U>,
-//     Product<H, <T as Combine<U>>::Output>: HList,
-// {
-//     type Output = Product<H, <T as Combine<U>>::Output>;
+impl<H, T: HList, U: HList> Combine<U> for Product<H, T>
+where
+    T: Combine<U>,
+    Product<H, <T as Combine<U>>::Output>: HList,
+{
+    type Output = Product<H, <T as Combine<U>>::Output>;
 
-//     #[inline]
-//     fn combine(self, other: U) -> Self::Output {
-//         Product(self.0, self.1.combine(other))
-//     }
-// }
+    #[inline]
+    fn combine(self, other: U) -> Self::Output {
+        Product(self.0, self.1.combine(other))
+    }
+}
 
-// impl HList for () {
-//     type Tuple = ();
-//     #[inline]
-//     fn flatten(self) -> Self::Tuple {
-//         ()
-//     }
-// }
+impl HList for () {
+    type Tuple = ();
+    #[inline]
+    fn flatten(self) -> Self::Tuple {
+        ()
+    }
+}
 
-// impl Tuple for () {
-//     type HList = ();
+impl Tuple for () {
+    type HList = ();
 
-//     #[inline]
-//     fn hlist(self) -> Self::HList {
-//         ()
-//     }
-// }
+    #[inline]
+    fn hlist(self) -> Self::HList {
+        ()
+    }
+}
 
-// impl<F, R> Func<()> for F
-// where
-//     F: Fn() -> R,
-// {
-//     type Output = R;
+impl<F, R> Func<()> for F
+where
+    F: Fn() -> R,
+{
+    type Output = R;
 
-//     #[inline]
-//     fn call(&self, _args: ()) -> Self::Output {
-//         (*self)()
-//     }
-// }
+    #[inline]
+    fn call(&self, _args: ()) -> Self::Output {
+        (*self)()
+    }
+}
 
 // impl<F, R> Func<crate::Rejection> for F
 // where
