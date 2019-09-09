@@ -157,7 +157,7 @@ pub mod reply;
 // pub use self::redirect::redirect;
 // #[doc(hidden)]
 // #[allow(deprecated)]
-// pub use self::reject::{reject, Rejection};
+pub use self::reject::{reject, Rejection};
 // #[doc(hidden)]
 // pub use self::reply::{reply, Reply};
 // pub use self::server::{serve, Server};
