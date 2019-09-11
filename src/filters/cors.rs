@@ -412,7 +412,7 @@ mod internal {
     use std::pin::Pin;
     use std::future::Future;
 
-    use futures::{future, ready};
+    use futures::{future, ready, TryFuture};
     use headers::Origin;
     use http::header;
 
@@ -432,6 +432,7 @@ mod internal {
     where
         F: Filter,
         F::Extract: Send,
+        F::Future: TryFuture,
         F::Error: CombineRejection<Rejection>,
     {
         type Extract =
@@ -452,19 +453,19 @@ mod internal {
                         config: self.config.clone(),
                         origin,
                     };
-                    future::Either::A(future::ok((Either::A((preflight,)),)))
+                    future::Either::Left(future::ok((Either::A((preflight,)),)))
                 }
-                Ok(Validated::Simple(origin)) => future::Either::B(WrappedFuture {
+                Ok(Validated::Simple(origin)) => future::Either::Right(WrappedFuture {
                     inner: self.inner.filter(),
                     wrapped: Some((self.config.clone(), origin)),
                 }),
-                Ok(Validated::NotCors) => future::Either::B(WrappedFuture {
+                Ok(Validated::NotCors) => future::Either::Right(WrappedFuture {
                     inner: self.inner.filter(),
                     wrapped: None,
                 }),
                 Err(err) => {
                     let rejection = crate::reject::known(CorsForbidden { kind: err });
-                    future::Either::A(future::err(rejection.into()))
+                    future::Either::Left(future::err(rejection.into()))
                 }
             }
         }
@@ -514,24 +515,30 @@ mod internal {
 
     impl<F> Future for WrappedFuture<F>
     where
-        F: Future,
+        F: TryFuture + Unpin,
+        F::Error: CombineRejection<Rejection>,
     {
-        type Output = Result<One<Either<One<Preflight>, One<Either<One<Wrapped<F::Output>>, F::Output>>>>, Rejection>;
+        type Output = Result<One<Either<One<Preflight>, One<Either<One<Wrapped<F::Ok>>, F::Ok>>>>, <F::Error as CombineRejection<Rejection>>::Rejection>;
 
 
-        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-            let inner = ready!(self.inner.poll(cx));
-            let item = if let Some((config, origin)) = self.wrapped.take() {
-                (Either::A((Wrapped {
-                    config,
-                    inner,
-                    origin,
-                },)),)
-            } else {
-                (Either::B(inner),)
-            };
-            let item = (Either::B(item),);
-            Poll::Ready(Ok(item.into()))
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+            let inner = ready!(Pin::new(&mut (*self).inner).try_poll(cx));
+            match inner {
+                Ok(inner) => {
+                    let item = if let Some((config, origin)) = self.wrapped.take() {
+                        (Either::A((Wrapped {
+                            config,
+                            inner,
+                            origin,
+                        },)),)
+                    } else {
+                        (Either::B(inner),)
+                    };
+                    let item = (Either::B(item),);
+                    Poll::Ready(Ok(item))
+                },
+                Err(err) => Poll::Ready(Err(err.into())),
+            }
         }
     }
 

@@ -60,9 +60,9 @@ pub fn ws2() -> impl Filter<Extract = One<Ws2>, Error = Rejection> + Copy {
     let connection_has_upgrade = header::header2()
         .and_then(|conn: ::headers::Connection| {
             if conn.contains("upgrade") {
-                Ok(())
+                future::ok(())
             } else {
-                Err(crate::reject::bad_request())
+                future::err(crate::reject::bad_request())
             }
         })
         .untuple_one();
@@ -228,7 +228,7 @@ impl WebSocket {
     }
 
     /// Gracefully close this websocket.
-    pub fn close(mut self) -> impl Future<Item = (), Error = crate::Error> {
+    pub fn close(mut self) -> impl Future<Output = (), Error = crate::Error> {
         future::poll_fn(move || Sink::close(&mut self))
     }
 }

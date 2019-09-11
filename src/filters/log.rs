@@ -247,9 +247,9 @@ mod internal {
     {
         type Output = Result<(Logged,), F::Error>;
 
-        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-            let ref_mut = self.get_mut();
-            let (result, status) = match Pin::new(&mut ref_mut.future).try_poll(cx) {
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+            let me = &mut *self;
+            let (result, status) = match Pin::new(&mut me.future).try_poll(cx) {
                 Poll::Ready(Ok(reply)) => {
                     let resp = reply.into_response();
                     let status = resp.status();
@@ -264,9 +264,9 @@ mod internal {
             };
 
             route::with(|route| {
-                (ref_mut.log.func)(Info {
+                (self.log.func)(Info {
                     route,
-                    start: ref_mut.started,
+                    start: self.started,
                     status,
                 });
             });

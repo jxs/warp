@@ -106,8 +106,8 @@ impl fmt::Debug for FormData {
 impl Stream for FormData {
     type Item = Result<Part, crate::Error>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        match self.inner.read_entry() {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        match (*self).inner.read_entry() {
             Ok(Some(mut field)) => {
                 let mut data = Vec::new();
                 field
@@ -166,7 +166,7 @@ impl fmt::Debug for Part {
 impl Stream for Part {
     type Item = Vec<u8>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.data.take())
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        Poll::Ready((*self).data.take())
     }
 }

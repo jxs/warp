@@ -217,7 +217,7 @@ pub fn end() -> impl Filter<Extract = (), Error = Rejection> + Copy {
 ///         format!("You asked for /{}", id)
 ///     });
 /// ```
-pub fn param<T: FromStr + Send>() -> impl Filter<Extract = One<T>, Error = Rejection> + Copy {
+pub fn param<T: FromStr + Send + 'static>() -> impl Filter<Extract = One<T>, Error = Rejection> + Copy {
     segment(|seg| {
         logcrate::trace!("param?: {:?}", seg);
         if seg.is_empty() {
@@ -248,7 +248,7 @@ pub fn param<T: FromStr + Send>() -> impl Filter<Extract = One<T>, Error = Rejec
 /// ```
 pub fn param2<T>() -> impl Filter<Extract = One<T>, Error = Rejection> + Copy
 where
-    T: FromStr + Send,
+    T: FromStr + Send + 'static,
     T::Err: Into<crate::reject::Cause>,
 {
     segment(|seg| {
@@ -424,7 +424,7 @@ impl fmt::Debug for FullPath {
 fn segment<F, U>(func: F) -> impl Filter<Extract = U, Error = Rejection> + Copy
 where
     F: Fn(&str) -> Result<U, Rejection> + Copy,
-    U: Tuple + Send,
+    U: Tuple + Send + 'static,
 {
     filter_fn(move |route| {
         let (u, idx) = {
@@ -436,7 +436,7 @@ where
             (func(seg), seg.len())
         };
         route.set_unmatched_path(idx);
-        future::ok(u)
+        future::ready(u)
     })
 }
 

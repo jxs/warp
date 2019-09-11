@@ -5,20 +5,20 @@
 
 pub mod addr;
 pub mod any;
-// pub mod body;
-// pub mod cookie;
-// pub mod cors;
+pub mod body;
+pub mod cookie;
+pub mod cors;
 pub mod ext;
-// pub mod fs;
+pub mod fs;
 pub mod header;
 pub mod log;
 pub mod method;
-// #[cfg(feature = "multipart")]
-// pub mod multipart;
-// pub mod path;
+#[cfg(feature = "multipart")]
+pub mod multipart;
+pub mod path;
 pub mod query;
 pub mod reply;
-// pub mod sse;
+pub mod sse;
 // #[cfg(feature = "websocket")]
 // pub mod ws;
 

@@ -44,12 +44,12 @@ use std::task::{Context, Poll};
 use std::pin::Pin;
 use std::future::Future;
 
-use futures::{future, Stream, TryStream, TryStreamExt};
+use futures::{future, stream, Stream, TryStream, TryStreamExt};
 use http::header::{HeaderValue, CACHE_CONTROL, CONTENT_TYPE};
 use hyper::Body;
 use serde::Serialize;
 use serde_json;
-use tokio::{clock::now, timer::Delay};
+use tokio::{clock::now, timer::{self, Delay}};
 
 use self::sealed::{
     BoxedServerSentEvent, EitherServerSentEvent, SseError, SseField, SseFormat, SseWrapper,
@@ -291,7 +291,7 @@ tuple_fmt!((A, B, C, D, E, F, G, H) => (0, 1, 2, 3, 4, 5, 6, 7));
 /// ```
 pub fn last_event_id<T>() -> impl Filter<Extract = One<Option<T>>, Error = Rejection>
 where
-    T: FromStr + Send,
+    T: FromStr + Send + 'static,
 {
     header::header("last-event-id")
         .map(Some)
@@ -302,7 +302,7 @@ where
             {
                 return future::ok((None,));
             }
-            Err(rejection)
+            future::err(rejection)
         })
 }
 
@@ -501,7 +501,7 @@ impl KeepAlive {
         S::Ok: ServerSentEvent + Send,
         S::Error: StdError + Send + Sync + 'static,
     {
-        let alive_timer = Delay::new(now() + self.max_interval);
+        let alive_timer = timer::delay(now() + self.max_interval);
         SseKeepAlive {
             event_stream,
             comment_text: self.comment_text,
@@ -529,14 +529,14 @@ pub fn keep<S>(
     Error = impl StdError + Send + Sync + 'static,
 > + Send + 'static
 where
-    S: Stream + Send + 'static + Unpin,
-    // S::Item: ServerSentEvent + Send,
-    // S::Error: StdError + Send + Sync + 'static,
+    S: TryStream + Send + 'static + Unpin,
+    S::Ok: ServerSentEvent + Send,
+    S::Error: StdError + Send + Sync + 'static,
 {
     let max_interval = keep_interval
         .into()
         .unwrap_or_else(|| Duration::from_secs(15));
-    let alive_timer = Delay::new(now() + max_interval);
+    let alive_timer = timer::delay(now() + max_interval);
     SseKeepAlive {
         event_stream,
         comment_text: Cow::Borrowed(""),
@@ -600,13 +600,14 @@ where
     type Item = Result<EitherServerSentEvent<S::Ok, SseComment<Cow<'static, str>>>, SseError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        match Pin::new(&mut self.event_stream).try_poll_next_unpin(cx) {
-            Poll::Pending => match Pin::new(&mut self.alive_timer).poll(cx) {
+        let pin = self.get_mut();
+        match Pin::new(&mut pin.event_stream).try_poll_next_unpin(cx) {
+            Poll::Pending => match Pin::new(&mut pin.alive_timer).poll(cx) {
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(_) => {
                     // restart timer
-                    self.alive_timer.reset(now() + self.max_interval);
-                    let comment_str = self.comment_text.clone();
+                    pin.alive_timer.reset(now() + pin.max_interval);
+                    let comment_str = pin.comment_text.clone();
                     Poll::Ready(Some(Ok(EitherServerSentEvent::B(SseComment(
                         comment_str,
                     )))))
@@ -614,7 +615,7 @@ where
             },
             Poll::Ready(Some(Ok(event))) => {
                 // restart timer
-                self.alive_timer.reset(now() + self.max_interval);
+                pin.alive_timer.reset(now() + pin.max_interval);
                 Poll::Ready(Some(Ok(EitherServerSentEvent::A(event))))
             },
             Poll::Ready(None) => Poll::Ready(None),

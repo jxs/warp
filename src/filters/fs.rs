@@ -6,12 +6,13 @@ use std::fs::Metadata;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::pin::Pin;
 use std::future::Future;
 use std::task::Poll;
 
 use bytes::{BufMut, BytesMut};
 use futures::future::Either;
-use futures::{future, stream, ready, FutureExt, Stream, StreamExt};
+use futures::{future, pin_mut, stream, ready, FutureExt, TryFutureExt, Stream, StreamExt};
 use headers::{
     AcceptRanges, ContentLength, ContentRange, ContentType, HeaderMapExt, IfModifiedSince, IfRange,
     IfUnmodifiedSince, LastModified, Range,
@@ -21,7 +22,6 @@ use hyper::{Body, Chunk};
 use mime_guess;
 use tokio::fs::File as TkFile;
 use tokio::io::AsyncRead;
-use tokio_threadpool;
 use urlencoding::decode;
 
 use crate::filter::{Filter, FilterClone, One};
@@ -59,78 +59,72 @@ pub fn file(path: impl Into<PathBuf>) -> impl FilterClone<Extract = One<File>, E
             ArcPath(path.clone())
         })
         .and(conditionals())
-        .and_then(file_reply)
-}
-
-/// Creates a `Filter` that serves a directory at the base `path` joined
-/// by the request path.
-///
-/// This can be used to serve "static files" from a directory. By far the most
-/// common pattern of serving static files is for `GET` requests, so this
-/// filter automatically includes a `GET` check.
-///
-/// # Example
-///
-/// ```
-/// use warp::Filter;
-///
-/// // Matches requests that start with `/static`,
-/// // and then uses the rest of that path to lookup
-/// // and serve a file from `/www/static`.
-/// let route = warp::path("static")
-///     .and(warp::fs::dir("/www/static"));
-///
-/// // For example:
-/// // - `GET /static/app.js` would serve the file `/www/static/app.js`
-/// // - `GET /static/css/app.css` would serve the file `/www/static/css/app.css`
-/// ```
-///
-/// # Note
-///
-/// This filter uses `tokio-fs` to serve files, which requires the server
-/// to be run in the threadpool runtime. This is only important to remember
-/// if starting a runtime manually.
-pub fn dir(path: impl Into<PathBuf>) -> impl FilterClone<Extract = One<File>, Error = Rejection> {
-    let base = Arc::new(path.into());
-    crate::get2()
-        .and(path_from_tail(base))
-        .and(conditionals())
-        .and_then(file_reply)
-}
-
-fn path_from_tail(
-    base: Arc<PathBuf>,
-) -> impl FilterClone<Extract = One<ArcPath>, Error = Rejection> {
-    crate::path::tail()
-        .and_then(move |tail: crate::path::Tail| future::ready(sanitize_path(base.as_ref(), tail.as_str())))
-        .and_then(|buf: PathBuf| {
-            // Checking Path::is_dir can block since it has to read from disk,
-            // so put it in a blocking() future
-            let mut buf = Some(buf);
-            future::poll_fn(move |_| {
-                let is_dir = ready!(tokio_threadpool::blocking(|| buf
-                    .as_ref()
-                    .unwrap()
-                    .is_dir()));
-                let mut buf = buf.take().unwrap();
-                if is_dir {
-                    logcrate::debug!("dir: appending index.html to directory path");
-                    buf.push("index.html");
-                }
-
-                logcrate::trace!("dir: {:?}", buf);
-
-                ArcPath(Arc::new(buf)).into()
-            })
-            .map_err(|blocking_err: tokio_threadpool::BlockingError| {
-                logcrate::error!(
-                    "threadpool blocking error checking buf.is_dir(): {}",
-                    blocking_err,
-                );
-                reject::known(FsNeedsTokioThreadpool)
-            })
+    .and_then(|path, conditionals| {
+        let reply = file_reply(path, conditionals);
+        // pin_mut!(reply);
+        reply
         })
 }
+
+// /// Creates a `Filter` that serves a directory at the base `path` joined
+// /// by the request path.
+// ///
+// /// This can be used to serve "static files" from a directory. By far the most
+// /// common pattern of serving static files is for `GET` requests, so this
+// /// filter automatically includes a `GET` check.
+// ///
+// /// # Example
+// ///
+// /// ```
+// /// use warp::Filter;
+// ///
+// /// // Matches requests that start with `/static`,
+// /// // and then uses the rest of that path to lookup
+// /// // and serve a file from `/www/static`.
+// /// let route = warp::path("static")
+// ///     .and(warp::fs::dir("/www/static"));
+// ///
+// /// // For example:
+// /// // - `GET /static/app.js` would serve the file `/www/static/app.js`
+// /// // - `GET /static/css/app.css` would serve the file `/www/static/css/app.css`
+// /// ```
+// ///
+// /// # Note
+// ///
+// /// This filter uses `tokio-fs` to serve files, which requires the server
+// /// to be run in the threadpool runtime. This is only important to remember
+// /// if starting a runtime manually.
+// pub fn dir(path: impl Into<PathBuf>) -> impl FilterClone<Extract = One<File>, Error = Rejection> {
+//     let base = Arc::new(path.into());
+//     crate::get2()
+//         .and(path_from_tail(base))
+//         .and(conditionals())
+//         .and_then(file_reply)
+// }
+
+// fn path_from_tail(
+//     base: Arc<PathBuf>,
+// ) -> impl FilterClone<Extract = One<ArcPath>, Error = Rejection> {
+//     crate::path::tail()
+//         .and_then(move |tail: crate::path::Tail| future::ready(sanitize_path(base.as_ref(), tail.as_str())))
+//         .and_then(|buf: PathBuf| {
+//             let mut buf = Some(buf);
+//             tokio_executor::blocking::run(move || buf
+//                                           .as_ref()
+//                                           .unwrap()
+//                                           .is_dir())
+//                 .map(move |is_dir| {
+//                     let mut buf = buf.take().unwrap();
+//                     if is_dir {
+//                         logcrate::debug!("dir: appending index.html to directory path");
+//                         buf.push("index.html");
+//                     }
+//                     logcrate::trace!("dir: {:?}", buf);
+//                     // Ok(ArcPath(Arc::new(buf)).into())
+//                     Err(reject::known(FsNeedsTokioThreadpool))
+//                 })
+//         })
+// }
 
 fn sanitize_path(base: impl AsRef<Path>, tail: &str) -> Result<PathBuf, Rejection> {
     let mut buf = PathBuf::from(base.as_ref());
@@ -283,16 +277,16 @@ fn file_reply(
     })
 }
 
-fn file_metadata(f: TkFile) -> impl Future<Output = Result<(TkFile, Metadata), Rejection>> {
-    let mut f = Some(f);
-    future::poll_fn(move |_| {
-        let meta = ready!(f.as_mut().unwrap().poll_metadata());
-        (f.take().unwrap(), meta).into()
-    })
-    .map_err(|err: ::std::io::Error| {
-        logcrate::debug!("file metadata error: {}", err);
-        reject::not_found()
-    })
+async fn file_metadata(f: TkFile) -> Result<(TkFile, Metadata), Rejection> {
+        match f.metadata().await {
+            Ok(meta) => {
+                Ok((f, meta))
+            }
+            Err(err) => {
+                logcrate::debug!("file metadata error: {}", err);
+                Err(reject::not_found())
+            }
+        }
 }
 
 fn file_conditional(
@@ -300,7 +294,7 @@ fn file_conditional(
     path: ArcPath,
     conditionals: Conditionals,
 ) -> impl Future<Output = Result<File, Rejection>> + Send {
-    file_metadata(f).map(move |(file, meta)| {
+    file_metadata(f).map_ok(move |(file, meta)| {
         let mut len = meta.len();
         let modified = meta.modified().ok().map(LastModified::from);
 
@@ -391,35 +385,43 @@ fn bytes_range(range: Option<Range>, max_len: u64) -> Result<(u64, u64), BadRang
 }
 
 fn file_stream(
-    file: TkFile,
+    mut file: TkFile,
     buf_size: usize,
     (start, end): (u64, u64),
 ) -> impl Stream<Item = Result<Chunk, io::Error>> + Send {
     use std::io::SeekFrom;
 
-    // seek
-    let seek = if start != 0 {
-        logcrate::trace!("partial content; seeking ({}..{})", start, end);
-        Either::Left(file.seek(SeekFrom::Start(start)).map(|(f, _pos)| f))
-    } else {
-        Either::Right(future::ok(file))
+    let seek = async move {
+        if start != 0 {
+            file.seek(SeekFrom::Start(start)).await?;
+        }
+        Ok(file)
     };
 
     seek.into_stream()
-        .map(move |mut f| {
+        .map(move |result| {
             let mut buf = BytesMut::new();
             let mut len = end - start;
-            stream::poll_fn(move |_| {
+            let mut f = match result {
+                Ok(f) => f,
+                Err(f) => return Either::Left(stream::once(future::err(f)))
+            };
+
+            Either::Right(stream::poll_fn(move |cx| {
+
                 if len == 0 {
                     return Poll::Ready(None.into());
                 }
                 if buf.remaining_mut() < buf_size {
                     buf.reserve(buf_size);
                 }
-                let n = ready!(f.read_buf(&mut buf).map_err(|err| {
-                    logcrate::debug!("file read error: {}", err);
-                    err
-                })) as u64;
+                let n = match ready!(Pin::new(&mut f).poll_read_buf(cx, &mut buf)) {
+                    Ok(n) => n as u64,
+                    Err(err) => {
+                        logcrate::debug!("file read error: {}", err);
+                        return Poll::Ready(Some(Err(err)));
+                    },
+                };
 
                 if n == 0 {
                     logcrate::debug!("file read found EOF before expected length");
@@ -434,8 +436,8 @@ fn file_stream(
                     len -= n;
                 }
 
-                Poll::Ready(Some(Chunk::from(chunk)))
-            })
+                Poll::Ready(Some(Ok(Chunk::from(chunk))))
+            }))
         })
         .flatten()
 }
