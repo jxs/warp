@@ -16,7 +16,7 @@ pub struct MapErr<T, F> {
 impl<T, F, E> FilterBase for MapErr<T, F>
 where
     T: Filter,
-    F: Fn(T::Error) -> E + Clone + Send + Unpin,
+    F: Fn(T::Error) -> E + Clone + Send,
     E: Reject,
 {
     type Extract = T::Extract;
@@ -40,12 +40,13 @@ pub struct MapErrFuture<T: Filter, F> {
 impl<T, F, E> Future for MapErrFuture<T, F>
 where
     T: Filter,
-    F: Fn(T::Error) -> E + Unpin,
+    F: Fn(T::Error) -> E,
 {
     type Output = Result<T::Extract, E>;
 
     #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        Pin::new(&mut (*self).extract).try_poll(cx).map_err(|err| (self.callback)(err))
+        let mut extract = &mut get_unchecked!(self).extract;
+        pin_unchecked!(extract).try_poll(cx).map_err(|err| (self.callback)(err))
     }
 }

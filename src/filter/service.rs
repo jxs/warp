@@ -46,16 +46,17 @@ pub struct FilteredFuture<F> {
 
 impl<F> Future for FilteredFuture<F>
 where
-    F: TryFuture + Unpin,
+    F: TryFuture,
 {
     type Output = Result<F::Ok, F::Error>;
 
     #[inline]
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         debug_assert!(!route::is_set(), "nested route::set calls");
 
-        let pin_fut = Pin::new(&mut self.future);
-        route::set(&self.route, || pin_fut.try_poll(cx))
+        let mut pin = get_unchecked!(self);
+        let fut = &mut pin.future;
+        route::set(&pin.route, || pin_unchecked!(fut).try_poll(cx))
     }
 }
 

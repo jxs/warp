@@ -66,7 +66,7 @@ impl FormOptions {
     }
 }
 
-type FormFut = Box<dyn Future<Output = Result<(FormData,), Rejection>> + Send + Unpin>;
+type FormFut = Box<dyn Future<Output = Result<(FormData,), Rejection>> + Send>;
 
 impl FilterBase for FormOptions {
     type Extract = (FormData,);

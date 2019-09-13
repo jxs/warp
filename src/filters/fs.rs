@@ -29,42 +29,42 @@ use crate::never::Never;
 use crate::reject::{self, Rejection};
 use crate::reply::{Reply, Response};
 
-/// Creates a `Filter` that serves a File at the `path`.
-///
-/// Does not filter out based on any information of the request. Always serves
-/// the file at the exact `path` provided. Thus, this can be used to serve a
-/// single file with `GET`s, but could also be used in combination with other
-/// filters, such as after validating in `POST` request, wanting to return a
-/// specific file as the body.
-///
-/// For serving a directory, see [dir](dir).
-///
-/// # Example
-///
-/// ```
-/// // Always serves this file from the file system.
-/// let route = warp::fs::file("/www/static/app.js");
-/// ```
-///
-/// # Note
-///
-/// This filter uses `tokio-fs` to serve files, which requires the server
-/// to be run in the threadpool runtime. This is only important to remember
-/// if starting a runtime manually.
-pub fn file(path: impl Into<PathBuf>) -> impl FilterClone<Extract = One<File>, Error = Rejection> {
-    let path = Arc::new(path.into());
-    crate::any()
-        .map(move || {
-            logcrate::trace!("file: {:?}", path);
-            ArcPath(path.clone())
-        })
-        .and(conditionals())
-    .and_then(|path, conditionals| {
-        let reply = file_reply(path, conditionals);
-        // pin_mut!(reply);
-        reply
-        })
-}
+// /// Creates a `Filter` that serves a File at the `path`.
+// ///
+// /// Does not filter out based on any information of the request. Always serves
+// /// the file at the exact `path` provided. Thus, this can be used to serve a
+// /// single file with `GET`s, but could also be used in combination with other
+// /// filters, such as after validating in `POST` request, wanting to return a
+// /// specific file as the body.
+// ///
+// /// For serving a directory, see [dir](dir).
+// ///
+// /// # Example
+// ///
+// /// ```
+// /// // Always serves this file from the file system.
+// /// let route = warp::fs::file("/www/static/app.js");
+// /// ```
+// ///
+// /// # Note
+// ///
+// /// This filter uses `tokio-fs` to serve files, which requires the server
+// /// to be run in the threadpool runtime. This is only important to remember
+// /// if starting a runtime manually.
+// pub fn file(path: impl Into<PathBuf>) -> impl FilterClone<Extract = One<File>, Error = Rejection> {
+//     let path = Arc::new(path.into());
+//     crate::any()
+//         .map(move || {
+//             logcrate::trace!("file: {:?}", path);
+//             ArcPath(path.clone())
+//         })
+//         .and(conditionals())
+//     .and_then(|path, conditionals| {
+//         let reply = file_reply(path, conditionals);
+//         // pin_mut!(reply);
+//         reply
+//         })
+// }
 
 // /// Creates a `Filter` that serves a directory at the base `path` joined
 // /// by the request path.
@@ -102,29 +102,24 @@ pub fn file(path: impl Into<PathBuf>) -> impl FilterClone<Extract = One<File>, E
 //         .and_then(file_reply)
 // }
 
-// fn path_from_tail(
-//     base: Arc<PathBuf>,
-// ) -> impl FilterClone<Extract = One<ArcPath>, Error = Rejection> {
-//     crate::path::tail()
-//         .and_then(move |tail: crate::path::Tail| future::ready(sanitize_path(base.as_ref(), tail.as_str())))
-//         .and_then(|buf: PathBuf| {
-//             let mut buf = Some(buf);
-//             tokio_executor::blocking::run(move || buf
-//                                           .as_ref()
-//                                           .unwrap()
-//                                           .is_dir())
-//                 .map(move |is_dir| {
-//                     let mut buf = buf.take().unwrap();
-//                     if is_dir {
-//                         logcrate::debug!("dir: appending index.html to directory path");
-//                         buf.push("index.html");
-//                     }
-//                     logcrate::trace!("dir: {:?}", buf);
-//                     // Ok(ArcPath(Arc::new(buf)).into())
-//                     Err(reject::known(FsNeedsTokioThreadpool))
-//                 })
-//         })
-// }
+fn path_from_tail(
+    base: Arc<PathBuf>,
+) -> impl FilterClone<Extract = One<ArcPath>, Error = Rejection> {
+    crate::path::tail()
+        .and_then(move |tail: crate::path::Tail| {
+            future::ready(sanitize_path(base.as_ref(), tail.as_str()))
+                .and_then(|mut buf| async {
+                    let clone_buf = buf.clone();
+                    let is_dir = tokio_executor::blocking::run(move || clone_buf.is_dir()).await;
+                    if is_dir {
+                        logcrate::debug!("dir: appending index.html to directory path");
+                        buf.push("index.html");
+                    }
+                    logcrate::trace!("dir: {:?}", buf);
+                    Ok(ArcPath(Arc::new(buf)))
+                })
+        })
+}
 
 fn sanitize_path(base: impl AsRef<Path>, tail: &str) -> Result<PathBuf, Rejection> {
     let mut buf = PathBuf::from(base.as_ref());
@@ -461,23 +456,6 @@ fn get_block_size(metadata: &Metadata) -> usize {
 #[cfg(not(unix))]
 fn get_block_size(_metadata: &Metadata) -> usize {
     8_192
-}
-
-// ===== Rejections =====
-
-#[derive(Debug)]
-pub(crate) struct FsNeedsTokioThreadpool;
-
-impl ::std::fmt::Display for FsNeedsTokioThreadpool {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        f.write_str("File system operations require tokio threadpool runtime")
-    }
-}
-
-impl StdError for FsNeedsTokioThreadpool {
-    fn description(&self) -> &str {
-        "File system operations require tokio threadpool runtime"
-    }
 }
 
 #[cfg(test)]

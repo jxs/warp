@@ -1,3 +1,15 @@
+macro_rules! pin_unchecked {
+    ($arg:expr) => {
+        unsafe { std::pin::Pin::new_unchecked($arg) }
+    }
+}
+
+macro_rules! get_unchecked {
+    ($arg:ident) => {
+        unsafe { $arg.as_mut().get_unchecked_mut() }
+    }
+}
+
 mod and;
 mod and_then;
 mod boxed;
@@ -6,7 +18,7 @@ mod map_err;
 mod or;
 mod or_else;
 mod recover;
-// mod service;
+mod service;
 mod unify;
 mod untuple_one;
 mod wrap;
@@ -36,7 +48,7 @@ pub(crate) use self::wrap::{Wrap, WrapSealed};
 pub trait FilterBase {
     type Extract: Tuple; // + Send;
     type Error: Reject;
-    type Future: TryFuture<Ok = Self::Extract, Error = Self::Error> + Send + Unpin;
+    type Future: Future<Output = Result<Self::Extract, Self::Error>> + Send;
 
     fn filter(&self) -> Self::Future;
 

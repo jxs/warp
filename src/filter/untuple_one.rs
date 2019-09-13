@@ -40,8 +40,9 @@ where
     type Output = Result<T, F::Error>;
 
     #[inline]
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        match ready!(Pin::new(&mut self.get_mut().extract).try_poll(cx)) {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let mut extract = &mut get_unchecked!(self).extract;
+        match ready!(pin_unchecked!(extract).try_poll(cx)) {
             Ok((t,)) => Poll::Ready(Ok(t)),
             Err(err) => Poll::Ready(Err(err)),
         }

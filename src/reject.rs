@@ -406,22 +406,20 @@ impl Rejections {
                     StatusCode::PAYLOAD_TOO_LARGE
                 } else if e.is::<UnsupportedMediaType>() {
                     StatusCode::UNSUPPORTED_MEDIA_TYPE
-                // } else if e.is::<crate::body::BodyReadError>() {
-//                     StatusCode::BAD_REQUEST
-//                 } else if e.is::<crate::body::BodyDeserializeError>() {
-//                     StatusCode::BAD_REQUEST
-//                 // } else if e.is::<crate::cors::CorsForbidden>() {
-//                 //     StatusCode::FORBIDDEN
-//                 } else if e.is::<crate::ext::MissingExtension>() {
-//                     StatusCode::INTERNAL_SERVER_ERROR
-//                 } else if e.is::<crate::reply::ReplyHttpError>() {
-//                     StatusCode::INTERNAL_SERVER_ERROR
-//                 } else if e.is::<crate::reply::ReplyJsonError>() {
-//                     StatusCode::INTERNAL_SERVER_ERROR
-//                 } else if e.is::<crate::body::BodyConsumedMultipleTimes>() {
-//                     StatusCode::INTERNAL_SERVER_ERROR
-//                 } else if e.is::<crate::fs::FsNeedsTokioThreadpool>() {
-//                     StatusCode::INTERNAL_SERVER_ERROR
+                } else if e.is::<crate::body::BodyReadError>() {
+                    StatusCode::BAD_REQUEST
+                } else if e.is::<crate::body::BodyDeserializeError>() {
+                    StatusCode::BAD_REQUEST
+                } else if e.is::<crate::cors::CorsForbidden>() {
+                    StatusCode::FORBIDDEN
+                } else if e.is::<crate::ext::MissingExtension>() {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                } else if e.is::<crate::reply::ReplyHttpError>() {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                } else if e.is::<crate::reply::ReplyJsonError>() {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                } else if e.is::<crate::body::BodyConsumedMultipleTimes>() {
+                    StatusCode::INTERNAL_SERVER_ERROR
                 } else {
                     unreachable!("unexpected 'Known' rejection: {:?}", e);
                 }

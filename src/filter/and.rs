@@ -3,8 +3,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::future::Future;
 
-use futures::future::TryFuture;
-
 use futures::ready;
 
 use super::{Combine, Filter, FilterBase, HList, Tuple};
@@ -19,8 +17,8 @@ pub struct And<T, U> {
 impl<T, U> FilterBase for And<T, U>
 where
     T: Filter,
-    T::Extract: Send + Unpin,
-    U: Filter + Clone + Send + Unpin,
+    T::Extract: Send,
+    U: Filter + Clone + Send,
     <T::Extract as Tuple>::HList: Combine<<U::Extract as Tuple>::HList> + Send,
     <<<T::Extract as Tuple>::HList as Combine<<U::Extract as Tuple>::HList>>::Output as HList>::Tuple: Send,
     U::Error: CombineRejection<T::Error>,
@@ -50,8 +48,7 @@ enum State<T: Filter, U: Filter> {
 impl<T, U> Future for AndFuture<T, U>
 where
     T: Filter,
-    T::Extract: Unpin,
-    U: Filter + Unpin,
+    U: Filter,
     //T::Extract: Combine<U::Extract>,
     <T::Extract as Tuple>::HList: Combine<<U::Extract as Tuple>::HList> + Send,
     U::Error: CombineRejection<T::Error>,
@@ -61,34 +58,26 @@ where
         <U::Error as CombineRejection<T::Error>>::Rejection>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let ex1 = match (*self).state {
-            State::First(ref mut first, _) => match ready!(Pin::new(first).try_poll(cx)) {
-                Ok(first) => first,
-                Err(err) => return Poll::Ready(Err(From::from(err)))
-
-            }
-            State::Second(ref mut ex1, ref mut second) => {
-                let ex2 = match ready!(Pin::new(second).try_poll(cx)) {
-                    Ok(second) => second,
+        let pin = get_unchecked!(self);
+        loop {
+            let (ex1, fut2) = match pin.state {
+                State::First(ref mut first, ref mut second) => match ready!(pin_unchecked!(first).poll(cx)) {
+                    Ok(first) => (first, second.filter()),
                     Err(err) => return Poll::Ready(Err(From::from(err)))
-                };
-                let ex3 = ex1.take().unwrap().hlist().combine(ex2.hlist()).flatten();
-                return Poll::Ready(Ok(ex3));
-            }
-            State::Done => panic!("polled after complete"),
-        };
+                }
+                State::Second(ref mut ex1, ref mut second) => {
+                    let ex2 = match ready!(pin_unchecked!(second).poll(cx)) {
+                        Ok(second) => second,
+                        Err(err) => return Poll::Ready(Err(From::from(err)))
+                    };
+                    let ex3 = ex1.take().unwrap().hlist().combine(ex2.hlist()).flatten();
+                    get_unchecked!(self).state = State::Done;
+                    return Poll::Ready(Ok(ex3));
+                }
+                State::Done => panic!("polled after complete"),
+            };
 
-        let mut second = match mem::replace(&mut self.state, State::Done) {
-            State::First(_, second) => second.filter(),
-            _ => unreachable!(),
-        };
-
-        match Pin::new(&mut second).try_poll(cx)? {
-            Poll::Ready(ex2) => Poll::Ready(Ok(ex1.hlist().combine(ex2.hlist()).flatten())),
-            Poll::Pending => {
-                self.state = State::Second(Some(ex1), second);
-                Poll::Pending
-            }
+            pin.state = State::Second(Some(ex1), fut2);
         }
     }
 }

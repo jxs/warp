@@ -87,6 +87,7 @@
 extern crate logcrate;
 
 mod error;
+#[macro_use]
 mod filter;
 pub mod filters;
 mod generic;
@@ -95,7 +96,7 @@ pub mod redirect;
 pub mod reject;
 pub mod reply;
 mod route;
-// mod server;
+mod server;
 // // pub mod test;
 // #[cfg(feature = "tls")]
 // mod tls;
@@ -106,9 +107,9 @@ pub use self::filter::Filter;
 // This otherwise shows a big dump of re-exports in the doc homepage,
 // // with zero context, so just hide it from the docs. Doc examples
 // // on each can show that a convenient import exists.
-#[cfg(feature = "multipart")]
-#[doc(hidden)]
-pub use self::filters::multipart;
+// #[cfg(feature = "multipart")]
+// #[doc(hidden)]
+// pub use self::filters::multipart;
 // #[cfg(feature = "websocket")]
 // #[doc(hidden)]
 // pub use self::filters::ws;
@@ -122,10 +123,10 @@ pub use self::filters::{
     cookie,
     // cookie() function
     cookie::cookie,
-    // cors,
+    cors,
     // cors() function
-    // cors::cors,
-//     ext,
+    cors::cors,
+    ext,
 //     fs,
     header,
     // header() function

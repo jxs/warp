@@ -432,7 +432,7 @@ mod internal {
     where
         F: Filter,
         F::Extract: Send,
-        F::Future: TryFuture,
+        F::Future: Future,
         F::Error: CombineRejection<Rejection>,
     {
         type Extract =
@@ -515,17 +515,18 @@ mod internal {
 
     impl<F> Future for WrappedFuture<F>
     where
-        F: TryFuture + Unpin,
+        F: TryFuture,
         F::Error: CombineRejection<Rejection>,
     {
         type Output = Result<One<Either<One<Preflight>, One<Either<One<Wrapped<F::Ok>>, F::Ok>>>>, <F::Error as CombineRejection<Rejection>>::Rejection>;
 
 
         fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-            let inner = ready!(Pin::new(&mut (*self).inner).try_poll(cx));
-            match inner {
+            let mut pin = get_unchecked!(self);
+            let mut inner = &mut pin.inner;
+            match ready!(pin_unchecked!(inner).try_poll(cx)) {
                 Ok(inner) => {
-                    let item = if let Some((config, origin)) = self.wrapped.take() {
+                    let item = if let Some((config, origin)) = pin.wrapped.take() {
                         (Either::A((Wrapped {
                             config,
                             inner,
