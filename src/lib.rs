@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/warp/0.1.20")]
+#![doc(html_root_url = "https://docs.rs/warp/0.2.0-alpha.1")]
 #![deny(missing_docs)]
 #![deny(missing_debug_implementations)]
 #![cfg_attr(test, deny(warnings))]
@@ -86,13 +86,13 @@
 macro_rules! pin_unchecked {
     ($arg:expr) => {
         unsafe { std::pin::Pin::new_unchecked($arg) }
-    }
+    };
 }
 
 macro_rules! get_unchecked {
     ($arg:ident) => {
         unsafe { $arg.as_mut().get_unchecked_mut() }
-    }
+    };
 }
 
 mod error;
@@ -170,14 +170,16 @@ pub use self::reject::{reject, Rejection};
 #[doc(hidden)]
 pub use self::reply::{reply, Reply};
 pub use self::server::{serve, Server};
-pub use hyper::rt::spawn;
 #[doc(hidden)]
 pub use http;
+pub use hyper::rt::spawn;
 
 #[doc(hidden)]
 pub use bytes::Buf;
 #[doc(hidden)]
-pub use futures::{Future, Sink, Stream};
+pub use futures_core::{Future, Stream};
+#[doc(hidden)]
+pub use futures_sink::Sink;
 #[doc(hidden)]
 
 pub(crate) type Request = http::Request<hyper::Body>;

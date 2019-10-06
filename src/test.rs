@@ -81,25 +81,23 @@
 //! ```
 use std::error::Error as StdError;
 use std::fmt;
-use std::net::SocketAddr;
 use std::future::Future;
+use std::net::SocketAddr;
 #[cfg(feature = "websocket")]
 use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::{future, FutureExt, TryFutureExt, TryStreamExt};
+use futures_util::{future, FutureExt as _, TryFutureExt as _, TryStreamExt as _};
 #[cfg(feature = "websocket")]
-use futures::{SinkExt, StreamExt};
-#[cfg(feature = "websocket")]
-use tokio::{
-    sync::{mpsc, oneshot},
-};
+use futures_util::{SinkExt as _, StreamExt as _};
 use http::{
     header::{HeaderName, HeaderValue},
     HttpTryFrom, Response,
 };
 use serde::Serialize;
 use serde_json;
+#[cfg(feature = "websocket")]
+use tokio::sync::{mpsc, oneshot};
 
 use crate::filter::Filter;
 use crate::reject::Reject;
@@ -338,21 +336,21 @@ impl RequestBuilder {
         assert!(!route::is_set(), "nested test filter calls");
 
         let route = Route::new(self.req, self.remote_addr);
-        let mut fut = route::set(&route, move || f.filter())
-            .then(|result| {
-                let res = match result {
-                    Ok(rep) => rep.into_response(),
-                    Err(rej) => {
-                        log::debug!("rejected: {:?}", rej);
-                        rej.into_response()
-                    }
-                };
-                let (parts, body) = res.into_parts();
-                body.try_concat()
-                    .map_ok(|chunk| Response::from_parts(parts, chunk.into()))
-            });
+        let mut fut = route::set(&route, move || f.filter()).then(|result| {
+            let res = match result {
+                Ok(rep) => rep.into_response(),
+                Err(rej) => {
+                    log::debug!("rejected: {:?}", rej);
+                    rej.into_response()
+                }
+            };
+            let (parts, body) = res.into_parts();
+            body.try_concat()
+                .map_ok(|chunk| Response::from_parts(parts, chunk.into()))
+        });
 
-        let fut = future::poll_fn(move |cx| route::set(&route, || pin_unchecked!(&mut fut).poll(cx)));
+        let fut =
+            future::poll_fn(move |cx| route::set(&route, || pin_unchecked!(&mut fut).poll(cx)));
 
         fut.await.expect("reply shouldn't fail")
     }
@@ -368,9 +366,7 @@ impl RequestBuilder {
 
         let route = Route::new(self.req, self.remote_addr);
         let mut fut = route::set(&route, move || f.filter());
-        future::poll_fn(move |cx| {
-            route::set(&route, || pin_unchecked!(&mut fut).poll(cx))
-        })
+        future::poll_fn(move |cx| route::set(&route, || pin_unchecked!(&mut fut).poll(cx)))
     }
 }
 
@@ -498,17 +494,12 @@ impl WsBuilder {
             );
 
             let (tx, rx) = ws.split();
-            let write = wr_rx
-                .map(|msg| Ok(msg))
-                .forward(tx)
-                .map(|_| ());
+            let write = wr_rx.map(|msg| Ok(msg)).forward(tx).map(|_| ());
 
             let read = rx
-                .take_while(|result| {
-                    match result {
-                        Err(_) => future::ready(false),
-                        Ok(m) => future::ready(!m.is_close())
-                    }
+                .take_while(|result| match result {
+                    Err(_) => future::ready(false),
+                    Ok(m) => future::ready(!m.is_close()),
                 })
                 .map(|result| Ok(result))
                 .forward(rd_tx.sink_map_err(|e| panic!("ws receive error: {}", e)))
@@ -520,7 +511,7 @@ impl WsBuilder {
         match upgraded_rx.await {
             Ok(Ok(())) => Ok(WsClient {
                 tx: wr_tx,
-                rx: rd_rx
+                rx: rd_rx,
             }),
             Ok(Err(err)) => Err(WsError::new(err)),
             Err(_canceled) => panic!("websocket handshake thread panicked"),
@@ -542,16 +533,14 @@ impl WsClient {
 
     /// Receive a websocket message from the server.
     pub async fn recv(&mut self) -> Result<crate::filters::ws::Message, WsError> {
-        self.rx.next().await
-            .map(|unbounded_result| {
-                unbounded_result.map_err(WsError::new)
-            })
+        self.rx
+            .next()
+            .await
+            .map(|unbounded_result| unbounded_result.map_err(WsError::new))
             .unwrap_or_else(|| {
                 // websocket is closed
                 Err(WsError::new("closed"))
             })
-
-
     }
 
     /// Assert the server has closed the connection.
@@ -609,11 +598,23 @@ struct AddrConnect(SocketAddr);
 impl ::hyper::client::connect::Connect for AddrConnect {
     type Transport = ::tokio::net::tcp::TcpStream;
     type Error = ::std::io::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<(Self::Transport, hyper::client::connect::Connected), Self::Error>> + Send>>;
+    type Future = Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        (Self::Transport, hyper::client::connect::Connected),
+                        Self::Error,
+                    >,
+                > + Send,
+        >,
+    >;
 
     fn connect(&self, _: ::hyper::client::connect::Destination) -> Self::Future {
-        Box::pin(tokio::net::tcp::TcpStream::connect(self.0.clone())
-                 .map(|result| result.map(|sock| (sock, ::hyper::client::connect::Connected::new()))))
+        Box::pin(
+            tokio::net::tcp::TcpStream::connect(self.0.clone()).map(|result| {
+                result.map(|sock| (sock, ::hyper::client::connect::Connected::new()))
+            }),
+        )
     }
 }
 

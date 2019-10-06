@@ -4,12 +4,13 @@
 
 use std::error::Error as StdError;
 use std::fmt;
+use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::future::Future;
 
 use bytes::Buf;
-use futures::{future, ready, TryFuture, TryStreamExt, Stream};
+use futures_core::Stream;
+use futures_util::{future, ready, TryStreamExt as _};
 use headers::ContentLength;
 use http::header::CONTENT_TYPE;
 use hyper::{Body, Chunk};
@@ -259,7 +260,7 @@ impl Future for Concat {
     type Output = Result<FullBody, Rejection>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        match ready!(Pin::new(&mut self.get_mut().fut).try_poll(cx)) {
+        match ready!(Pin::new(&mut self.get_mut().fut).poll(cx)) {
             Ok(chunk) => Poll::Ready(Ok(FullBody { chunk })),
             Err(err) => {
                 log::debug!("concat error: {}", err);
@@ -280,10 +281,11 @@ impl Stream for BodyStream {
     type Item = Result<StreamBuf, crate::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let opt_item: Option<Result<Chunk, hyper::Error>> = ready!(Pin::new(&mut self.get_mut().body).poll_next(cx));
+        let opt_item: Option<Result<Chunk, hyper::Error>> =
+            ready!(Pin::new(&mut self.get_mut().body).poll_next(cx));
 
         match opt_item {
-            None =>  Poll::Ready(None),
+            None => Poll::Ready(None),
             Some(item) => {
                 let stream_buf = item
                     .map_err(|e| crate::Error::from(crate::error::Kind::Hyper(e)))

@@ -3,12 +3,13 @@
 //! Filters that extract a multipart body for a route.
 
 use std::fmt;
-use std::io::{Cursor, Read};
-use std::task::{Context, Poll};
 use std::future::Future;
+use std::io::{Cursor, Read};
 use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use futures::{future, Stream};
+use futures_core::Stream;
+use futures_util::future;
 use headers::ContentType;
 use mime::Mime;
 use multipart::server::Multipart;
@@ -76,7 +77,8 @@ impl FilterBase for FormOptions {
     fn filter(&self) -> Self::Future {
         let boundary = super::header::header2::<ContentType>().and_then(|ct| {
             let mime = Mime::from(ct);
-            let mime = mime.get_param("boundary")
+            let mime = mime
+                .get_param("boundary")
                 .map(|v| v.to_string())
                 .ok_or_else(|| reject::invalid_header("content-type"));
             future::ready(mime)

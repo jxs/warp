@@ -806,7 +806,10 @@ mod tests {
 
         let resp = reject.into_response();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(response_body_string(resp).await, "Unhandled rejection: right");
+        assert_eq!(
+            response_body_string(resp).await,
+            "Unhandled rejection: right"
+        );
 
         // There's no real way to determine which is worse, since both are a 500,
         // so pick the first one.
@@ -825,7 +828,10 @@ mod tests {
 
         let resp = reject.into_response();
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(response_body_string(resp).await, "Unhandled rejection: right");
+        assert_eq!(
+            response_body_string(resp).await,
+            "Unhandled rejection: right"
+        );
     }
 
     #[tokio::test]
@@ -874,7 +880,7 @@ mod tests {
     }
 
     async fn response_body_string(resp: crate::reply::Response) -> String {
-        use futures::TryStreamExt;
+        use futures_util::TryStreamExt as _;
 
         let (_, body) = resp.into_parts();
         match body.try_concat().await {

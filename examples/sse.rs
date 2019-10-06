@@ -1,10 +1,10 @@
+use futures::{never::Never, StreamExt};
 use std::time::Duration;
 use tokio::{clock::now, timer::Interval};
-use futures::{never::Never, StreamExt};
-use warp::{Filter, sse::ServerSentEvent};
+use warp::{sse::ServerSentEvent, Filter};
 
 // create server-sent event
-fn sse_counter(counter: u64) ->  Result<impl ServerSentEvent, Never> {
+fn sse_counter(counter: u64) -> Result<impl ServerSentEvent, Never> {
     Ok(warp::sse::data(counter))
 }
 

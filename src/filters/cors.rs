@@ -331,9 +331,7 @@ impl Configured {
                         return Err(Forbidden::MethodNotAllowed);
                     }
                 } else {
-                    log::trace!(
-                        "preflight request missing access-control-request-method header"
-                    );
+                    log::trace!("preflight request missing access-control-request-method header");
                     return Err(Forbidden::MethodNotAllowed);
                 }
 
@@ -412,12 +410,13 @@ impl Configured {
 }
 
 mod internal {
+    use std::future::Future;
+    use std::pin::Pin;
     use std::sync::Arc;
     use std::task::{Context, Poll};
-    use std::pin::Pin;
-    use std::future::Future;
 
-    use futures::{future, ready, TryFuture};
+    use futures_core::{ready, TryFuture};
+    use futures_util::future;
     use headers::Origin;
     use http::header;
 
@@ -523,8 +522,10 @@ mod internal {
         F: TryFuture,
         F::Error: CombineRejection<Rejection>,
     {
-        type Output = Result<One<Either<One<Preflight>, One<Either<One<Wrapped<F::Ok>>, F::Ok>>>>, <F::Error as CombineRejection<Rejection>>::Rejection>;
-
+        type Output = Result<
+            One<Either<One<Preflight>, One<Either<One<Wrapped<F::Ok>>, F::Ok>>>>,
+            <F::Error as CombineRejection<Rejection>>::Rejection,
+        >;
 
         fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
             let pin = get_unchecked!(self);
@@ -542,7 +543,7 @@ mod internal {
                     };
                     let item = (Either::B(item),);
                     Poll::Ready(Ok(item))
-                },
+                }
                 Err(err) => Poll::Ready(Err(err.into())),
             }
         }

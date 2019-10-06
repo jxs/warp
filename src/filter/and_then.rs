@@ -1,8 +1,8 @@
+use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::future::Future;
 
-use futures::{ready, TryFuture};
+use futures_core::{ready, TryFuture};
 
 use super::{Filter, FilterBase, Func};
 use crate::reject::CombineRejection;
@@ -61,24 +61,28 @@ where
     F::Output: TryFuture + Send,
     <F::Output as TryFuture>::Error: CombineRejection<T::Error>,
 {
-    type Output = Result<(<F::Output as TryFuture>::Ok,),
-                         <<F::Output as TryFuture>::Error as CombineRejection<T::Error>>::Rejection>;
+    type Output = Result<
+        (<F::Output as TryFuture>::Ok,),
+        <<F::Output as TryFuture>::Error as CombineRejection<T::Error>>::Rejection,
+    >;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let pin = get_unchecked!(self);
         loop {
             let (ex1, second) = match pin.state {
-                State::First(ref mut first, ref mut second) => match ready!(pin_unchecked!(first).try_poll(cx)) {
-                    Ok(first) => (first, second),
-                    Err(err) => return Poll::Ready(Err(From::from(err)))
-                },
+                State::First(ref mut first, ref mut second) => {
+                    match ready!(pin_unchecked!(first).try_poll(cx)) {
+                        Ok(first) => (first, second),
+                        Err(err) => return Poll::Ready(Err(From::from(err))),
+                    }
+                }
                 State::Second(ref mut second) => {
                     let ex3 = match ready!(pin_unchecked!(second).try_poll(cx)) {
                         Ok(item) => Ok((item,)),
-                        Err(err) => Err(From::from(err))
+                        Err(err) => Err(From::from(err)),
                     };
                     pin.state = State::Done;
-                    return Poll::Ready(ex3)
+                    return Poll::Ready(ex3);
                 }
                 State::Done => panic!("polled after complete"),
             };

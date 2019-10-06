@@ -12,7 +12,8 @@ async fn main() {
 
     warp::serve(routes)
         .tls("examples/tls/cert.pem", "examples/tls/key.rsa")
-        .run(([127, 0, 0, 1], 3030)).await;
+        .run(([127, 0, 0, 1], 3030))
+        .await;
 }
 
 #[cfg(not(feature = "tls"))]

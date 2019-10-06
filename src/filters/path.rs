@@ -129,8 +129,8 @@
 use std::fmt;
 use std::str::FromStr;
 
+use futures_util::future;
 use http::uri::PathAndQuery;
-use futures::future;
 
 use crate::filter::{filter_fn, one, Filter, One, Tuple};
 use crate::never::Never;
@@ -217,7 +217,8 @@ pub fn end() -> impl Filter<Extract = (), Error = Rejection> + Copy {
 ///         format!("You asked for /{}", id)
 ///     });
 /// ```
-pub fn param<T: FromStr + Send + 'static>() -> impl Filter<Extract = One<T>, Error = Rejection> + Copy {
+pub fn param<T: FromStr + Send + 'static>(
+) -> impl Filter<Extract = One<T>, Error = Rejection> + Copy {
     segment(|seg| {
         log::trace!("param?: {:?}", seg);
         if seg.is_empty() {
@@ -339,7 +340,7 @@ pub fn peek() -> impl Filter<Extract = One<Peek>, Error = Never> + Copy {
         let path = path_and_query(&route);
         let idx = route.matched_path_index();
 
-       future::ok(one(Peek {
+        future::ok(one(Peek {
             path,
             start_index: idx,
         }))

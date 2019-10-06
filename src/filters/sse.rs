@@ -40,18 +40,22 @@
 use std::borrow::Cow;
 use std::error::Error as StdError;
 use std::fmt::{self, Display, Formatter, Write};
-use std::str::FromStr;
-use std::time::Duration;
-use std::task::{Context, Poll};
-use std::pin::Pin;
 use std::future::Future;
+use std::pin::Pin;
+use std::str::FromStr;
+use std::task::{Context, Poll};
+use std::time::Duration;
 
-use futures::{future, Stream, TryStream, TryStreamExt};
+use futures_core::{Stream, TryStream};
+use futures_util::{future, TryStreamExt as _};
 use http::header::{HeaderValue, CACHE_CONTROL, CONTENT_TYPE};
 use hyper::Body;
 use serde::Serialize;
 use serde_json;
-use tokio::{clock::now, timer::{self, Delay}};
+use tokio::{
+    clock::now,
+    timer::{self, Delay},
+};
 
 use self::sealed::{
     BoxedServerSentEvent, EitherServerSentEvent, SseError, SseField, SseFormat, SseWrapper,
@@ -504,10 +508,10 @@ impl KeepAlive {
     pub fn stream<S>(
         self,
         event_stream: S,
-    ) -> impl TryStream<
-        Ok = impl ServerSentEvent + Send + 'static,
-        Error = impl StdError + Send + Sync + 'static,
-    > + Send + 'static
+    ) -> impl Stream<
+        Item = Result<impl ServerSentEvent + Send + 'static, impl StdError + Send + Sync + 'static>,
+    > + Send
+           + 'static
     where
         S: TryStream + Send + 'static,
         S::Ok: ServerSentEvent + Send,
@@ -536,10 +540,10 @@ struct SseKeepAlive<S> {
 pub fn keep<S>(
     event_stream: S,
     keep_interval: impl Into<Option<Duration>>,
-) -> impl TryStream<
-    Ok = impl ServerSentEvent + Send + 'static,
-    Error = impl StdError + Send + Sync + 'static,
-> + Send + 'static
+) -> impl Stream<
+    Item = Result<impl ServerSentEvent + Send + 'static, impl StdError + Send + Sync + 'static>,
+> + Send
+       + 'static
 where
     S: TryStream + Send + 'static,
     S::Ok: ServerSentEvent + Send,
@@ -622,16 +626,14 @@ where
                     // restart timer
                     pin.alive_timer.reset(now() + pin.max_interval);
                     let comment_str = pin.comment_text.clone();
-                    Poll::Ready(Some(Ok(EitherServerSentEvent::B(SseComment(
-                        comment_str,
-                    )))))
+                    Poll::Ready(Some(Ok(EitherServerSentEvent::B(SseComment(comment_str)))))
                 }
             },
             Poll::Ready(Some(Ok(event))) => {
                 // restart timer
                 pin.alive_timer.reset(now() + pin.max_interval);
                 Poll::Ready(Some(Ok(EitherServerSentEvent::A(event))))
-            },
+            }
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Ready(Some(Err(error))) => {
                 log::error!("sse::keep error: {}", error);

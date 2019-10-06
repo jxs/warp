@@ -1,9 +1,9 @@
 #![deny(warnings)]
 
+use serde_derive::{Deserialize, Serialize};
 use std::env;
 use std::sync::{Arc, Mutex};
 use warp::{http::StatusCode, Filter};
-use serde_derive::{Deserialize, Serialize};
 
 /// So we don't have to tackle how different database work, we'll just use
 /// a simple in-memory DB, a vector synchronized by a mutex.

@@ -567,5 +567,4 @@ mod tests {
 
         assert_eq!(res.status(), 500);
     }
-
 }

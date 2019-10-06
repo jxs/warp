@@ -1,8 +1,8 @@
+use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::future::Future;
 
-use futures::ready;
+use futures_util::ready;
 
 use super::{Combine, Filter, FilterBase, HList, Tuple};
 use crate::reject::CombineRejection;
@@ -60,14 +60,16 @@ where
         let pin = get_unchecked!(self);
         loop {
             let (ex1, fut2) = match pin.state {
-                State::First(ref mut first, ref mut second) => match ready!(pin_unchecked!(first).poll(cx)) {
-                    Ok(first) => (first, second.filter()),
-                    Err(err) => return Poll::Ready(Err(From::from(err)))
+                State::First(ref mut first, ref mut second) => {
+                    match ready!(pin_unchecked!(first).poll(cx)) {
+                        Ok(first) => (first, second.filter()),
+                        Err(err) => return Poll::Ready(Err(From::from(err))),
+                    }
                 }
                 State::Second(ref mut ex1, ref mut second) => {
                     let ex2 = match ready!(pin_unchecked!(second).poll(cx)) {
                         Ok(second) => second,
-                        Err(err) => return Poll::Ready(Err(From::from(err)))
+                        Err(err) => return Poll::Ready(Err(From::from(err))),
                     };
                     let ex3 = ex1.take().unwrap().hlist().combine(ex2.hlist()).flatten();
                     get_unchecked!(self).state = State::Done;

@@ -1,8 +1,8 @@
+use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::future::Future;
 
-use futures::{ready, TryFuture};
+use futures_core::ready;
 
 use super::{Filter, FilterBase};
 use crate::generic::Either;
@@ -60,26 +60,29 @@ where
     U: Filter,
     U::Error: CombineRejection<T::Error>,
 {
-    type Output = Result<(Either<T::Extract, U::Extract>,), <U::Error as CombineRejection<T::Error>>::Rejection>;
+    type Output = Result<
+        (Either<T::Extract, U::Extract>,),
+        <U::Error as CombineRejection<T::Error>>::Rejection,
+    >;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let pin = get_unchecked!(self);
         loop {
             let (err1, fut2) = match pin.state {
-                State::First(ref mut first, ref mut second) => match ready!(pin_unchecked!(first).try_poll(cx)) {
-                    Ok(ex1) => {
-                        return Poll::Ready(Ok((Either::A(ex1),)));
+                State::First(ref mut first, ref mut second) => {
+                    match ready!(pin_unchecked!(first).poll(cx)) {
+                        Ok(ex1) => {
+                            return Poll::Ready(Ok((Either::A(ex1),)));
+                        }
+                        Err(e) => {
+                            pin.original_path_index.reset_path();
+                            (e, second.filter())
+                        }
                     }
-                    Err(e) => {
-                        pin.original_path_index.reset_path();
-                        (e, second.filter())
-                    }
-                },
+                }
                 State::Second(ref mut err1, ref mut second) => {
-                    let ex2 = match ready!(pin_unchecked!(second).try_poll(cx)) {
-                        Ok(ex2) => {
-                            Ok((Either::B(ex2),))
-                        },
+                    let ex2 = match ready!(pin_unchecked!(second).poll(cx)) {
+                        Ok(ex2) => Ok((Either::B(ex2),)),
                         Err(e) => {
                             pin.original_path_index.reset_path();
                             let err1 = err1.take().expect("polled after complete");
@@ -87,7 +90,7 @@ where
                         }
                     };
                     pin.state = State::Done;
-                    return Poll::Ready(ex2)
+                    return Poll::Ready(ex2);
                 }
                 State::Done => panic!("polled after complete"),
             };

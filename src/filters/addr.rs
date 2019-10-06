@@ -22,5 +22,5 @@ use crate::never::Never;
 ///     });
 /// ```
 pub fn remote() -> impl Filter<Extract = (Option<SocketAddr>,), Error = Never> + Copy {
-    filter_fn_one(|route| futures::future::ready(Ok(route.remote_addr())))
+    filter_fn_one(|route| futures_util::future::ready(Ok(route.remote_addr())))
 }

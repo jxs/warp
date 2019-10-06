@@ -5,7 +5,7 @@ use std::fmt::{self, Display};
 
 use serde_derive::Serialize;
 use warp::http::StatusCode;
-use warp::{Future, Filter, Rejection, Reply};
+use warp::{Filter, Future, Rejection, Reply};
 
 #[derive(Copy, Clone, Debug)]
 enum Error {
@@ -34,11 +34,13 @@ impl StdError for Error {}
 async fn main() {
     let hello = warp::path::end().map(warp::reply);
 
-    let oops =
-        warp::path("oops").and_then(|| futures::future::ready(Err::<StatusCode, _>(warp::reject::custom(Error::Oops))));
+    let oops = warp::path("oops").and_then(|| {
+        futures::future::ready(Err::<StatusCode, _>(warp::reject::custom(Error::Oops)))
+    });
 
-    let nope =
-        warp::path("nope").and_then(|| futures::future::ready(Err::<StatusCode, _>(warp::reject::custom(Error::Nope))));
+    let nope = warp::path("nope").and_then(|| {
+        futures::future::ready(Err::<StatusCode, _>(warp::reject::custom(Error::Nope)))
+    });
 
     let routes = warp::get2()
         .and(hello.or(oops).or(nope))
@@ -49,7 +51,7 @@ async fn main() {
 
 // This function receives a `Rejection` and tries to return a custom
 // value, othewise simply passes the rejection along.
-fn customize_error(err: Rejection) -> impl Future< Output = Result<impl Reply, Rejection>> {
+fn customize_error(err: Rejection) -> impl Future<Output = Result<impl Reply, Rejection>> {
     let err = {
         if let Some(&err) = err.find_cause::<Error>() {
             let code = match err {

@@ -1,8 +1,8 @@
+use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::future::Future;
 
-use futures::{ready, TryFuture};
+use futures_core::ready;
 
 use super::{Filter, FilterBase, Tuple};
 
@@ -42,7 +42,7 @@ where
     #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let extract = &mut get_unchecked!(self).extract;
-        match ready!(pin_unchecked!(extract).try_poll(cx)) {
+        match ready!(pin_unchecked!(extract).poll(cx)) {
             Ok((t,)) => Poll::Ready(Ok(t)),
             Err(err) => Poll::Ready(Err(err)),
         }

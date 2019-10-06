@@ -1,9 +1,9 @@
 use std::fmt;
-use std::sync::Arc;
-use std::pin::Pin;
 use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 
-use futures::TryFutureExt;
+use futures_util::TryFutureExt;
 
 use super::{Filter, FilterBase, Tuple};
 use crate::reject::Rejection;

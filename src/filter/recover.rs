@@ -1,8 +1,8 @@
+use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::future::Future;
 
-use futures::{ready, TryFuture};
+use futures_core::{ready, TryFuture};
 
 use super::{Filter, FilterBase, Func};
 use crate::generic::Either;
@@ -71,16 +71,21 @@ where
 {
     // type Item = (Either<T::Extract, (<F::Output as IntoFuture>::Item,)>,);
     // type Error = <F::Output as IntoFuture>::Error;
-    type Output = Result<(Either<T::Extract, (<F::Output as TryFuture>::Ok,)>,), <F::Output as TryFuture>::Error>;
+    type Output = Result<
+        (Either<T::Extract, (<F::Output as TryFuture>::Ok,)>,),
+        <F::Output as TryFuture>::Error,
+    >;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let pin = get_unchecked!(self);
         loop {
             let (err, second) = match pin.state {
-                State::First(ref mut first, ref mut second) => match ready!(pin_unchecked!(first).try_poll(cx)) {
-                    Ok(ex) => return Poll::Ready(Ok((Either::A(ex),))),
-                    Err(err) => (err, second),
-                },
+                State::First(ref mut first, ref mut second) => {
+                    match ready!(pin_unchecked!(first).try_poll(cx)) {
+                        Ok(ex) => return Poll::Ready(Ok((Either::A(ex),))),
+                        Err(err) => (err, second),
+                    }
+                }
                 State::Second(ref mut second) => {
                     let ex2 = match ready!(pin_unchecked!(second).try_poll(cx)) {
                         Ok(ex2) => Ok((Either::B((ex2,)),)),

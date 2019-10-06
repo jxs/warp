@@ -2,15 +2,15 @@ use std::fs::File;
 use std::io::{self, BufReader, Read, Write};
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
 use std::pin::Pin;
 use std::ptr::null_mut;
-use std::task::{Poll, Context};
+use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use futures::ready;
-use rustls::{self, ServerConfig, ServerSession, Session, Stream};
 use hyper::server::accept::Accept;
 use hyper::server::conn::{AddrIncoming, AddrStream};
+use rustls::{self, ServerConfig, ServerSession, Session, Stream};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::transport::Transport;
@@ -144,7 +144,10 @@ pub(crate) struct TlsStream<T> {
 impl<T> TlsStream<T> {
     pub(crate) fn new(io: T, session: ServerSession) -> Self {
         TlsStream {
-            io: AllowStd{ inner: io, context: null_mut() },
+            io: AllowStd {
+                inner: io,
+                context: null_mut(),
+            },
             is_shutdown: false,
             session,
         }
@@ -162,25 +165,22 @@ impl<T> TlsStream<T> {
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> AsyncRead for TlsStream<T> {
-
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<io::Result<usize>> {
-        self.with_context(cx, |io, session| {
-            cvt(Stream::new(session, io).read(buf))
-        })
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        self.with_context(cx, |io, session| cvt(Stream::new(session, io).read(buf)))
     }
-
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> AsyncWrite for TlsStream<T> {
-
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        self.with_context(cx, |io, session| {
-            cvt(Stream::new(session, io).write(buf))
-        })
+        self.with_context(cx, |io, session| cvt(Stream::new(session, io).write(buf)))
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -224,7 +224,10 @@ pub(crate) struct TlsAcceptor {
 
 impl TlsAcceptor {
     pub(crate) fn new(config: ServerConfig, incoming: AddrIncoming) -> TlsAcceptor {
-        TlsAcceptor{ config: Arc::new(config), incoming }
+        TlsAcceptor {
+            config: Arc::new(config),
+            incoming,
+        }
     }
 }
 
@@ -232,16 +235,19 @@ impl Accept for TlsAcceptor {
     type Conn = TlsStream<AddrStream>;
     type Error = io::Error;
 
-    fn poll_accept(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
+    fn poll_accept(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
         let pin = self.get_mut();
         match ready!(Pin::new(&mut pin.incoming).poll_accept(cx)) {
             Some(Ok(sock)) => {
                 let session = ServerSession::new(&pin.config.clone());
                 // let tls = Arc::new($this.config);
                 return Poll::Ready(Some(Ok(TlsStream::new(sock, session))));
-            },
+            }
             Some(Err(e)) => Poll::Ready(Some(Err(e))),
-            None => Poll::Ready(None)
+            None => Poll::Ready(None),
         }
     }
 }

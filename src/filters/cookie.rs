@@ -1,7 +1,7 @@
 //! Cookie Filters
 
+use futures_util::future;
 use headers::Cookie;
-use futures::future;
 
 use super::header;
 use crate::filter::{filter_fn_one, Filter, One};
@@ -44,9 +44,11 @@ where
 {
     use headers::HeaderMapExt;
     filter_fn_one(move |route| {
-        future::ok(route
-            .headers()
-            .typed_get()
-            .and_then(|cookie: Cookie| cookie.get(name).map(func)))
+        future::ok(
+            route
+                .headers()
+                .typed_get()
+                .and_then(|cookie: Cookie| cookie.get(name).map(func)),
+        )
     })
 }

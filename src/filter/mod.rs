@@ -11,10 +11,11 @@ mod unify;
 mod untuple_one;
 mod wrap;
 
-use std::pin::Pin;
 use std::future::Future;
+use std::pin::Pin;
 
-use futures::{future, TryFuture, TryFutureExt};
+use futures_core::TryFuture;
+use futures_util::{future, try_future, TryFutureExt as _};
 
 pub(crate) use crate::generic::{one, Combine, Either, Func, HList, One, Tuple};
 use crate::reject::{CombineRejection, Reject, Rejection};
@@ -242,7 +243,7 @@ pub trait Filter: FilterBase {
     where
         Self: Sized,
         F: Func<Self::Error>,
-        F::Output: TryFuture<Ok =  Self::Extract, Error = Self::Error> + Send,
+        F::Output: TryFuture<Ok = Self::Extract, Error = Self::Error> + Send,
     {
         OrElse {
             filter: self,
@@ -424,7 +425,7 @@ where
 
 pub(crate) fn filter_fn_one<F, U>(
     func: F,
-) -> FilterFn<impl Fn(&mut Route) -> future::MapOk<U, fn(U::Ok) -> (U::Ok,)> + Copy>
+) -> FilterFn<impl Fn(&mut Route) -> try_future::MapOk<U, fn(U::Ok) -> (U::Ok,)> + Copy>
 where
     F: Fn(&mut Route) -> U + Copy,
     U: TryFuture,
@@ -453,7 +454,8 @@ where
 {
     type Extract = U::Ok;
     type Error = U::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Extract, Self::Error>> + Send + 'static>>;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Extract, Self::Error>> + Send + 'static>>;
 
     #[inline]
     fn filter(&self) -> Self::Future {

@@ -1,8 +1,6 @@
+use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::future::Future;
-
-use futures::TryFuture;
 
 use super::{Filter, FilterBase};
 use crate::reject::Reject;
@@ -47,6 +45,8 @@ where
     #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let extract = &mut get_unchecked!(self).extract;
-        pin_unchecked!(extract).try_poll(cx).map_err(|err| (self.callback)(err))
+        pin_unchecked!(extract)
+            .poll(cx)
+            .map_err(|err| (self.callback)(err))
     }
 }

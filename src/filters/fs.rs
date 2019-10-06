@@ -2,16 +2,19 @@
 
 use std::cmp;
 use std::fs::Metadata;
+use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::pin::Pin;
-use std::future::Future;
+use std::sync::Arc;
 use std::task::Poll;
 
 use bytes::{BufMut, BytesMut};
-use futures::future::Either;
-use futures::{future, stream, ready, FutureExt, TryFutureExt, Stream, StreamExt};
+use futures_core::Stream;
+use futures_util::{
+    future::{self, Either},
+    ready, stream, FutureExt as _, StreamExt as _, TryFutureExt as _,
+};
 use headers::{
     AcceptRanges, ContentLength, ContentRange, ContentType, HeaderMapExt, IfModifiedSince, IfRange,
     IfUnmodifiedSince, LastModified, Range,
@@ -58,9 +61,9 @@ pub fn file(path: impl Into<PathBuf>) -> impl FilterClone<Extract = One<File>, E
             ArcPath(path.clone())
         })
         .and(conditionals())
-    .and_then(|path, conditionals| {
-        let reply = file_reply(path, conditionals);
-        reply
+        .and_then(|path, conditionals| {
+            let reply = file_reply(path, conditionals);
+            reply
         })
 }
 
@@ -103,20 +106,20 @@ pub fn dir(path: impl Into<PathBuf>) -> impl FilterClone<Extract = One<File>, Er
 fn path_from_tail(
     base: Arc<PathBuf>,
 ) -> impl FilterClone<Extract = One<ArcPath>, Error = Rejection> {
-    crate::path::tail()
-        .and_then(move |tail: crate::path::Tail| {
-            future::ready(sanitize_path(base.as_ref(), tail.as_str()))
-                .and_then(|mut buf| async {
-                    let clone_buf = buf.clone();
-                    let is_dir = tokio_executor::blocking::run(move || clone_buf.is_dir()).await;
-                    if is_dir {
-                        log::debug!("dir: appending index.html to directory path");
-                        buf.push("index.html");
-                    }
-                    log::trace!("dir: {:?}", buf);
-                    Ok(ArcPath(Arc::new(buf)))
-                })
+    crate::path::tail().and_then(move |tail: crate::path::Tail| {
+        future::ready(sanitize_path(base.as_ref(), tail.as_str())).and_then(|mut buf| {
+            async {
+                let clone_buf = buf.clone();
+                let is_dir = tokio_executor::blocking::run(move || clone_buf.is_dir()).await;
+                if is_dir {
+                    log::debug!("dir: appending index.html to directory path");
+                    buf.push("index.html");
+                }
+                log::trace!("dir: {:?}", buf);
+                Ok(ArcPath(Arc::new(buf)))
+            }
         })
+    })
 }
 
 fn sanitize_path(base: impl AsRef<Path>, tail: &str) -> Result<PathBuf, Rejection> {
@@ -271,15 +274,13 @@ fn file_reply(
 }
 
 async fn file_metadata(f: TkFile) -> Result<(TkFile, Metadata), Rejection> {
-        match f.metadata().await {
-            Ok(meta) => {
-                Ok((f, meta))
-            }
-            Err(err) => {
-                log::debug!("file metadata error: {}", err);
-                Err(reject::not_found())
-            }
+    match f.metadata().await {
+        Ok(meta) => Ok((f, meta)),
+        Err(err) => {
+            log::debug!("file metadata error: {}", err);
+            Err(reject::not_found())
         }
+    }
 }
 
 fn file_conditional(
@@ -397,11 +398,10 @@ fn file_stream(
             let mut len = end - start;
             let mut f = match result {
                 Ok(f) => f,
-                Err(f) => return Either::Left(stream::once(future::err(f)))
+                Err(f) => return Either::Left(stream::once(future::err(f))),
             };
 
             Either::Right(stream::poll_fn(move |cx| {
-
                 if len == 0 {
                     return Poll::Ready(None.into());
                 }
@@ -413,7 +413,7 @@ fn file_stream(
                     Err(err) => {
                         log::debug!("file read error: {}", err);
                         return Poll::Ready(Some(Err(err)));
-                    },
+                    }
                 };
 
                 if n == 0 {

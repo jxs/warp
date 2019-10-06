@@ -3,13 +3,14 @@ sudo: false
 
 matrix:
   include:
-    - rust: stable
+    ## Note: async/await only available on beta
+    #- rust: stable
     - rust: beta
     - rust: nightly
 
-    # `tls` feature
-    - rust: stable
-      script: cargo test --features tls
+    ## `tls` feature
+    #- rust: stable
+    #  script: cargo test --features tls
 
 script:
   - cargo test

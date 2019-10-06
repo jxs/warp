@@ -1,9 +1,9 @@
-use std::net::SocketAddr;
-use std::task::{Context, Poll};
-use std::pin::Pin;
 use std::future::Future;
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use futures::future::TryFuture;
+use futures_core::TryFuture;
 
 use crate::reject::Reject;
 use crate::reply::Reply;
@@ -64,7 +64,7 @@ where
     F: Filter + Send + Sync + 'static,
     F::Extract: Reply,
     F::Error: Reject,
-    {
+{
     type Service = FilteredService<F>;
 
     #[inline]
@@ -78,7 +78,7 @@ where
     F: Filter + Send + Sync + 'static,
     F::Extract: Reply,
     F::Error: Reject,
-    {
+{
     type Service = FilteredService<F>;
 
     #[inline]

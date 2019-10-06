@@ -1,22 +1,23 @@
 use std::error::Error as StdError;
+use std::future::Future;
 use std::net::SocketAddr;
 #[cfg(feature = "tls")]
 use std::path::Path;
-use std::sync::Arc;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::future::Future;
 
-use futures::{future, FutureExt, TryFuture, TryStream, TryStreamExt};
+use futures_core::{TryFuture, TryStream};
+use futures_util::{future, FutureExt as _, TryStreamExt as _};
 use hyper::server::conn::AddrIncoming;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Server as HyperServer};
+use hyper::Server as HyperServer;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::never::Never;
 use crate::reject::Reject;
 use crate::reply::Reply;
 use crate::transport::Transport;
-use crate::never::Never;
 use crate::Request;
 
 /// Create a `Server` with the provided service.
@@ -54,8 +55,10 @@ macro_rules! into_service {
         make_service_fn(move |transport| {
             let inner = inner.clone();
             let remote_addr = Transport::remote_addr(transport);
-            future::ready(Result::Ok::<_, hyper::Error>(service_fn(move |req| ReplyFuture {
-                inner: inner.call(req, remote_addr),
+            future::ready(Result::Ok::<_, hyper::Error>(service_fn(move |req| {
+                ReplyFuture {
+                    inner: inner.call(req, remote_addr),
+                }
             })))
         })
     }};
@@ -128,7 +131,6 @@ where
     pub async fn run(self, addr: impl Into<SocketAddr> + 'static) {
         let (addr, fut) = self.bind_ephemeral(addr);
 
-
         log::info!("warp drive engaged: listening on http://{}", addr);
 
         fut.await;
@@ -144,7 +146,8 @@ where
         I::Ok: AsyncRead + AsyncWrite + Send + 'static + Unpin,
         I::Error: Into<Box<dyn StdError + Send + Sync>>,
     {
-        self.run_incoming2(incoming.map_ok(crate::transport::LiftIo).into_stream()).await;
+        self.run_incoming2(incoming.map_ok(crate::transport::LiftIo).into_stream())
+            .await;
     }
 
     async fn run_incoming2<I>(self, incoming: I)
@@ -166,10 +169,7 @@ where
     /// # Panics
     ///
     /// Panics if we are unable to bind to the provided address.
-    pub fn bind(
-        self,
-        addr: impl Into<SocketAddr> + 'static,
-    ) -> impl Future<Output = ()> + 'static {
+    pub fn bind(self, addr: impl Into<SocketAddr> + 'static) -> impl Future<Output = ()> + 'static {
         let (_, fut) = self.bind_ephemeral(addr);
         fut
     }
@@ -179,10 +179,7 @@ where
     ///
     /// In case we are unable to bind to the specified address, resolves to an
     /// error and logs the reason.
-    pub async fn try_bind(
-        self,
-        addr: impl Into<SocketAddr> + 'static,
-    ) {
+    pub async fn try_bind(self, addr: impl Into<SocketAddr> + 'static) {
         let addr = addr.into();
         let srv = match try_bind!(self, &addr) {
             Ok((_, srv)) => srv,
@@ -196,7 +193,8 @@ where
             if let Err(err) = result {
                 log::error!("server error: {}", err)
             }
-        }).await;
+        })
+        .await;
     }
 
     /// Bind to a possibly ephemeral socket address.
@@ -231,8 +229,7 @@ where
     pub fn try_bind_ephemeral(
         self,
         addr: impl Into<SocketAddr> + 'static,
-    ) -> Result<(SocketAddr, impl Future<Output = ()> + 'static), hyper::error::Error>
-    {
+    ) -> Result<(SocketAddr, impl Future<Output = ()> + 'static), hyper::error::Error> {
         let addr = addr.into();
         let (addr, srv) = try_bind!(self, &addr)?;
         let srv = srv.map(|result| {
@@ -283,13 +280,11 @@ where
         signal: impl Future<Output = ()> + Send + 'static,
     ) -> (SocketAddr, impl Future<Output = ()> + 'static) {
         let (addr, srv) = bind!(self, addr);
-        let fut = srv
-            .with_graceful_shutdown(signal)
-            .map(|result| {
-                if let Err(err) = result {
-                    log::error!("server error: {}", err)
-                }
-            });
+        let fut = srv.with_graceful_shutdown(signal).map(|result| {
+            if let Err(err) = result {
+                log::error!("server error: {}", err)
+            }
+        });
         (addr, fut)
     }
 
@@ -318,7 +313,8 @@ where
 
         let srv = HyperServer::builder(hyper::server::accept::from_stream(incoming.into_stream()))
             .http1_pipeline_flush(self.pipeline)
-            .serve(service).await;
+            .serve(service)
+            .await;
 
         if let Err(err) = srv {
             log::error!("server error: {}", err);
@@ -369,10 +365,7 @@ where
     /// executed on any runtime.
     ///
     /// *This function requires the `"tls"` feature.*
-    pub async fn bind(
-        self,
-        addr: impl Into<SocketAddr> + 'static,
-    ) {
+    pub async fn bind(self, addr: impl Into<SocketAddr> + 'static) {
         let (_, fut) = self.bind_ephemeral(addr);
         fut.await;
     }
@@ -410,12 +403,11 @@ where
     ) -> (SocketAddr, impl Future<Output = ()> + 'static) {
         let (addr, srv) = bind!(tls: self, addr);
 
-        let fut = srv
-            .with_graceful_shutdown(signal)
-            .map(|result| {
+        let fut = srv.with_graceful_shutdown(signal).map(|result| {
             if let Err(err) = result {
                 log::error!("server error: {}", err)
-            }});
+            }
+        });
         (addr, fut)
     }
 }

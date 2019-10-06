@@ -38,9 +38,11 @@ async fn main() {
         .and(warp::path::param::<usize>())
         .and(warp::body::content_length_limit(500))
         .and(warp::body::concat().and_then(|body: warp::body::FullBody| {
-            future::ready(std::str::from_utf8(body.bytes())
-                .map(String::from)
-                .map_err(warp::reject::custom))
+            future::ready(
+                std::str::from_utf8(body.bytes())
+                    .map(String::from)
+                    .map_err(warp::reject::custom),
+            )
         }))
         .and(users.clone())
         .map(|my_id, msg, users| {
@@ -73,7 +75,7 @@ async fn main() {
 
 fn user_connected(
     users: Users,
-) -> impl Stream<Item = Result<impl ServerSentEvent + Send + 'static, warp::Error >> + Send + 'static
+) -> impl Stream<Item = Result<impl ServerSentEvent + Send + 'static, warp::Error>> + Send + 'static
 {
     // Use a counter to assign a new unique ID for this user.
     let my_id = NEXT_USER_ID.fetch_add(1, Ordering::Relaxed);
