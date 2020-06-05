@@ -562,7 +562,7 @@ macro_rules! __internal_path {
     (@segment ..) => (
         compile_error!("'..' must be the last segment")
     );
-    (@segment $param:ty) => (
+    (@segment $param:path) => (
         $crate::path::param::<$param>()
     );
     // Constructs a unique ZST so the &'static str pointer doesn't need to
