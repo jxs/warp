@@ -160,6 +160,18 @@ macro_rules! generics {
             }
         }
 
+        impl<F, R, $type> Func<Result<($type,), crate::Rejection>> for F
+        where
+            F: Fn(Result<$type, crate::Rejection>) -> R,
+        {
+            type Output = R;
+
+            #[inline]
+            fn call(&self, args: Result<($type,), crate::Rejection>) -> Self::Output {
+                (*self)(args.map(|e| e.0))
+            }
+        }
+
     };
 
     ($type1:ident, $( $type:ident ),*) => {

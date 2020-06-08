@@ -39,6 +39,7 @@ use std::error::Error as StdError;
 use std::fmt;
 
 use crate::generic::{Either, One};
+use crate::reject::IsReject;
 use http::header::{HeaderName, HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
 use hyper::Body;
@@ -287,6 +288,19 @@ pub trait Reply: BoxedReply + Send {
         }
     }
     */
+}
+
+impl <E, R> Reply for Result<E, R>
+where
+    E: Reply,
+    R: IsReject,
+{
+    fn into_response(self) -> Response {
+        match self {
+            Ok(ex) => ex.into_response(),
+            Err(reject) => reject.into_response(),
+        }
+    }
 }
 
 impl<T: Reply + ?Sized> Reply for Box<T> {

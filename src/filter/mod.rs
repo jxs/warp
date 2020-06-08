@@ -7,6 +7,7 @@ mod or;
 mod or_else;
 mod recover;
 pub(crate) mod service;
+mod then;
 mod unify;
 mod untuple_one;
 mod wrap;
@@ -28,6 +29,7 @@ pub(crate) use self::map_err::MapErr;
 pub(crate) use self::or::Or;
 use self::or_else::OrElse;
 use self::recover::Recover;
+use self::then::Then;
 use self::unify::Unify;
 use self::untuple_one::UntupleOne;
 pub(crate) use self::wrap::{Wrap, WrapSealed};
@@ -226,6 +228,41 @@ pub trait Filter: FilterBase {
         <F::Output as TryFuture>::Error: CombineRejection<Self::Error>,
     {
         AndThen {
+            filter: self,
+            callback: fun,
+        }
+    }
+
+    /// Composes this `Filter` with a function receiving the Result<E, R>
+    /// where E is the extracted value and R the rejection
+    ///
+    /// The function should return some `TryFuture` type.
+    ///
+    /// The `Error` type of the return `Future` needs be a `Rejection`, which
+    /// means most futures will need to have their error mapped into one.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use warp::Filter;
+    ///
+    /// // Validate after `/:id`
+    /// warp::path::param().and_then(|id: u64| async move {
+    ///     if id != 0 {
+    ///         Ok(format!("Hello #{}", id))
+    ///     } else {
+    ///         Err(warp::reject::not_found())
+    ///     }
+    /// });
+    /// ```
+    fn then<F>(self, fun: F) -> Then<Self, F>
+    where
+        Self: Sized,
+        F: Func<Result<Self::Extract, Self::Error>> + Clone,
+        F::Output: TryFuture + Send,
+        <F::Output as TryFuture>::Error: CombineRejection<Self::Error>,
+    {
+        Then {
             filter: self,
             callback: fun,
         }
