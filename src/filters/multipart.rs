@@ -147,8 +147,8 @@ impl Part {
         self.content_type.as_ref().map(|s| &**s)
     }
 
-    /// Asynchronously get some of the data for this `Part`.
-    pub async fn data(&mut self) -> Option<Result<impl Buf, crate::Error>> {
+    /// Get some of the data for this `Part`.
+    pub fn data(&mut self) -> Option<Result<impl Buf, crate::Error>> {
         self.take_data()
     }
 
